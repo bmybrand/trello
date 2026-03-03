@@ -17,6 +17,9 @@
 /.next/
 /out/
 
+# uploaded cover images (stored in public/uploads/covers)
+/public/uploads/
+
 # production
 /build
 
