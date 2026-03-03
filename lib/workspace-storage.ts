@@ -271,14 +271,41 @@ export async function createBoard(
     .select("id, name, workspace_id, created_at")
     .single();
   if (error) return { data: null, error };
-  const id = String(created?.id ?? "");
   return {
-    data: {
-      id,
-      name: (created?.name as string) ?? name.trim(),
-      workspace_id: String(created?.workspace_id ?? workspaceId),
-      created_at: (created?.created_at as string) ?? new Date().toISOString(),
-    },
+    // Preserve the exact types Supabase returns so workspace_id
+    // stays consistent with getBoardsByWorkspace.
+    data: (created ?? null) as unknown as Board | null,
     error: null,
   };
+}
+
+/** Delete a board and its boardcards, list order, and orphaned card data. */
+export async function deleteBoard(boardId: string): Promise<{ error: Error | null }> {
+  const supabase = createClient();
+  const bid = String(boardId);
+
+  const { data: rows } = await supabase.from("boardcards").select("cardid").eq("boardname", bid);
+  const cardIds = new Set<number>((rows ?? []).map((r: { cardid: number }) => r.cardid));
+
+  await supabase.from("boardcards").delete().eq("boardname", bid);
+  await supabase.from("board_list_order").delete().eq("boardname", bid);
+
+  for (const cardId of cardIds) {
+    const { data: remaining } = await supabase.from("boardcards").select("id").eq("cardid", cardId).limit(1);
+    if (remaining?.length) continue;
+    const { data: card } = await supabase.from("cardslist").select("carditemid").eq("id", cardId).maybeSingle();
+    const itemId = card?.carditemid as number | undefined;
+    await supabase.from("cardslist").delete().eq("id", cardId);
+    if (itemId != null) {
+      const { data: otherCards } = await supabase.from("cardslist").select("id").eq("carditemid", itemId).limit(1);
+      if (!otherCards?.length) {
+        await supabase.from("item_comments").delete().eq("item_id", itemId);
+        await supabase.from("item_activities").delete().eq("item_id", itemId);
+        await supabase.from("itemslist").delete().eq("id", itemId);
+      }
+    }
+  }
+
+  const { error } = await supabase.from("boards").delete().eq("id", bid);
+  return { error };
 }

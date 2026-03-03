@@ -37,6 +37,7 @@ import {
   getWorkspacesForUser,
   getBoardsByWorkspace,
   createBoard,
+  deleteBoard,
   isWorkspaceMember,
 } from "@/lib/workspace-storage";
 import type { ItemComment, ItemActivity } from "@/lib/cards-storage";
@@ -508,15 +509,63 @@ export default function WorkspacePage() {
     const name = newBoardName.trim();
     if (!name) return;
     setAddCardError(null);
+    const tempId = `temp-${Date.now()}`;
+    const optimistic: Board = {
+      id: tempId,
+      name,
+      workspace_id: workspaceId,
+      created_at: new Date().toISOString(),
+    };
+    setBoards((prev) => [...prev, optimistic]);
+    setCurrentBoardId(tempId);
+    setBoardData((prev) => ({ ...prev, [tempId]: getEmptyListsForBoard(tempId) }));
+    setNewBoardName("");
+    setShowNewBoard(false);
+    if (showBoardPopup) setShowBoardPopup(false);
+
     const { data, error } = await createBoard(workspaceId, name);
-    if (error) { setAddCardError(error.message); return; }
+    if (error) {
+      setAddCardError(error.message);
+      setBoards((prev) => prev.filter((b) => b.id !== tempId));
+      setBoardData((prev) => { const next = { ...prev }; delete next[tempId]; return next; });
+      const remaining = boards.filter((b) => b.id !== tempId);
+      setCurrentBoardId(remaining[0]?.id ?? "");
+      return;
+    }
     if (data) {
-      setBoards((prev) => [...prev, data]);
+      setBoards((prev) => [
+        data,
+        ...prev.filter((b) => b.id !== tempId && b.id !== data.id),
+      ]);
       setCurrentBoardId(data.id);
-      setBoardData((prev) => ({ ...prev, [data.id]: getEmptyListsForBoard(data.id) }));
-      setNewBoardName("");
-      setShowNewBoard(false);
+      setBoardData((prev) => {
+        const next = { ...prev };
+        next[data.id] = next[tempId] ?? getEmptyListsForBoard(data.id);
+        delete next[tempId];
+        return next;
+      });
       broadcastRefresh();
+    }
+  };
+
+  const handleDeleteBoard = async (b: Board) => {
+    if (!confirm(`Delete board "${b.name}"? This cannot be undone.`)) return;
+    setAddCardError(null);
+    const wasCurrent = currentBoardId === b.id;
+    const remainingAfterDelete = boards.filter((x) => x.id !== b.id);
+    const nextId = remainingAfterDelete[0]?.id ?? "";
+
+    setBoards((prev) => prev.filter((x) => x.id !== b.id));
+    setBoardData((prev) => { const next = { ...prev }; delete next[b.id]; return next; });
+    if (wasCurrent) setCurrentBoardId(nextId);
+    setShowBoardPopup(false);
+
+    const { error } = await deleteBoard(b.id);
+    if (error) {
+      setAddCardError(error.message);
+      setBoards((prev) => [...prev, b]);
+      setBoardData((prev) => ({ ...prev, [b.id]: getEmptyListsForBoard(b.id) }));
+      if (wasCurrent) setCurrentBoardId(b.id);
     }
   };
 
@@ -646,9 +695,12 @@ export default function WorkspacePage() {
             <h3 className="text-lg font-semibold text-white mb-4">Change board</h3>
             <ul className="space-y-2">
               {boards.map((b) => (
-                <li key={b.id}>
-                  <button type="button" onClick={() => { setCurrentBoardId(b.id); setShowBoardPopup(false); }} className={`w-full text-left px-4 py-3 rounded-xl font-medium ${currentBoardId === b.id ? "bg-navy-700 text-white" : "bg-white/5 text-white/90 hover:bg-white/10"}`}>
+                <li key={b.id} className="flex items-center gap-2">
+                  <button type="button" onClick={() => { setCurrentBoardId(b.id); setShowBoardPopup(false); }} className={`flex-1 text-left px-4 py-3 rounded-xl font-medium ${currentBoardId === b.id ? "bg-navy-700 text-white" : "bg-white/5 text-white/90 hover:bg-white/10"}`}>
                     {b.name}
+                  </button>
+                  <button type="button" onClick={() => handleDeleteBoard(b)} className="p-2 rounded-lg text-white/50 hover:bg-red-500/20 hover:text-red-400 transition-colors" aria-label="Delete board">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /><line x1="10" x2="10" y1="11" y2="17" /><line x1="14" x2="14" y1="11" y2="17" /></svg>
                   </button>
                 </li>
               ))}

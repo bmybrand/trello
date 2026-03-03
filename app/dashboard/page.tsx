@@ -9,6 +9,7 @@ import {
   getWorkspacesForUser,
   getBoardsByWorkspace,
   createBoard,
+  deleteBoard,
   createWorkspace,
   getWorkspaceMembers,
   deleteWorkspace,
@@ -588,16 +589,43 @@ export default function Dashboard() {
     const workspaceId = addBoardWorkspaceId ?? workspaces[0]?.id;
     if (!name || !workspaceId) return;
     setError(null);
+    const ws = workspaces.find((w) => w.id === workspaceId);
+    const tempId = `temp-${Date.now()}`;
+    const optimistic: BoardWithWorkspace = {
+      id: tempId,
+      name,
+      workspace_id: workspaceId,
+      created_at: new Date().toISOString(),
+      workspaceName: ws?.name ?? "",
+    };
+    setBoards((prev) => [optimistic, ...prev]);
+    setAddBoardName("");
+    setAddBoardWorkspaceId(null);
+
     const { data, error: createErr } = await createBoard(workspaceId, name);
     if (createErr) {
       setError(normalizeNetworkError(createErr.message));
+      setBoards((prev) => prev.filter((b) => b.id !== tempId));
       return;
     }
     if (data) {
-      const ws = workspaces.find((w) => w.id === workspaceId);
-      setBoards((prev) => [{ ...data, workspaceName: ws?.name ?? "" }, ...prev]);
-      setAddBoardName("");
-      setAddBoardWorkspaceId(null);
+      const workspaceName = ws?.name ?? "";
+      setBoards((prev) => [
+        { ...data, workspaceName },
+        ...prev.filter((b) => b.id !== tempId && b.id !== data.id),
+      ]);
+    }
+  };
+
+  const handleDeleteBoard = async (board: BoardWithWorkspace) => {
+    if (!confirm(`Delete board "${board.name}"? This cannot be undone.`)) return;
+    setError(null);
+    setBoards((prev) => prev.filter((b) => b.id !== board.id));
+
+    const { error: delErr } = await deleteBoard(board.id);
+    if (delErr) {
+      setError(normalizeNetworkError(delErr.message));
+      setBoards((prev) => [board, ...prev]);
     }
   };
 
@@ -710,25 +738,34 @@ export default function Dashboard() {
                 {boards
                   .filter((b) => b.workspace_id === selectedWorkspaceForBoards.id)
                   .map((board, i) => (
-                  <Link
-                    key={board.id}
-                    href={`/workspace/${board.workspace_id}?board=${board.id}`}
-                    className="w-[200px] rounded-xl overflow-hidden bg-white/5 hover:bg-white/10 border border-white/10 transition-all text-left group block"
-                  >
-                    <div
-                      className={`aspect-[16/10] bg-gradient-to-br ${
-                        COVER_GRADIENTS[i % COVER_GRADIENTS.length]
-                      } shrink-0`}
-                    />
-                    <div className="p-3">
-                      <p className="text-white font-medium truncate group-hover:text-navy-400">
-                        {board.name}
-                      </p>
-                      <p className="text-white/50 text-xs truncate">
-                        {board.workspaceName}
-                      </p>
-                    </div>
-                  </Link>
+                  <div key={board.id} className="relative w-[200px] shrink-0 group/card">
+                    <Link
+                      href={`/workspace/${board.workspace_id}?board=${board.id}`}
+                      className="block w-full rounded-xl overflow-hidden bg-white/5 hover:bg-white/10 border border-white/10 transition-all text-left"
+                    >
+                      <div
+                        className={`aspect-[16/10] bg-gradient-to-br ${
+                          COVER_GRADIENTS[i % COVER_GRADIENTS.length]
+                        } shrink-0`}
+                      />
+                      <div className="p-3">
+                        <p className="text-white font-medium truncate group-hover/card:text-navy-400">
+                          {board.name}
+                        </p>
+                        <p className="text-white/50 text-xs truncate">
+                          {board.workspaceName}
+                        </p>
+                      </div>
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleDeleteBoard(board); }}
+                      className="absolute top-1.5 right-1.5 p-1.5 rounded-lg bg-black/50 hover:bg-red-500/80 text-white/80 hover:text-white transition-colors"
+                      aria-label="Delete board"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /><line x1="10" x2="10" y1="11" y2="17" /><line x1="14" x2="14" y1="11" y2="17" /></svg>
+                    </button>
+                  </div>
                 ))}
 
                 {addBoardWorkspaceId === selectedWorkspaceForBoards.id ? (
@@ -880,24 +917,33 @@ export default function Dashboard() {
                       </div>
                       <div className="flex gap-4 overflow-x-auto pb-2">
                         {wsBoards.map((board, i) => (
-                          <Link
-                            key={board.id}
-                            href={`/workspace/${board.workspace_id}?board=${board.id}`}
-                            className="w-[160px] shrink-0 rounded-xl overflow-hidden bg-white/5 hover:bg-white/10 border border-white/10 transition-all text-left group block"
-                          >
-                            <div
-                              className={`aspect-[16/10] bg-gradient-to-br ${
-                                COVER_GRADIENTS[
-                                  (wsIdx * 3 + i) % COVER_GRADIENTS.length
-                                ]
-                              } shrink-0`}
-                            />
-                            <div className="p-2.5">
-                              <p className="text-white font-medium text-sm truncate group-hover:text-navy-400">
-                                {board.name}
-                              </p>
-                            </div>
-                          </Link>
+                          <div key={board.id} className="relative w-[160px] shrink-0 group/card">
+                            <Link
+                              href={`/workspace/${board.workspace_id}?board=${board.id}`}
+                              className="block w-full rounded-xl overflow-hidden bg-white/5 hover:bg-white/10 border border-white/10 transition-all text-left"
+                            >
+                              <div
+                                className={`aspect-[16/10] bg-gradient-to-br ${
+                                  COVER_GRADIENTS[
+                                    (wsIdx * 3 + i) % COVER_GRADIENTS.length
+                                  ]
+                                } shrink-0`}
+                              />
+                              <div className="p-2.5">
+                                <p className="text-white font-medium text-sm truncate group-hover/card:text-navy-400">
+                                  {board.name}
+                                </p>
+                              </div>
+                            </Link>
+                            <button
+                              type="button"
+                              onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleDeleteBoard(board); }}
+                              className="absolute top-1 right-1 p-1 rounded-lg bg-black/50 hover:bg-red-500/80 text-white/80 hover:text-white transition-colors"
+                              aria-label="Delete board"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /><line x1="10" x2="10" y1="11" y2="17" /><line x1="14" x2="14" y1="11" y2="17" /></svg>
+                            </button>
+                          </div>
                         ))}
                         {isCreatingBoard ? (
                           <div className="w-[160px] shrink-0 rounded-xl bg-white/5 border border-white/10 p-4">
