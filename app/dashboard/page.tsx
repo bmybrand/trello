@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import { createClient, getCachedSession, clearSessionCache } from "@/lib/supabase";
 import {
   getWorkspacesForUser,
@@ -20,7 +21,7 @@ import type { Workspace, Board, WorkspaceMember, SearchUser } from "@/lib/worksp
 type BoardWithWorkspace = Board & { workspaceName: string };
 
 const COVER_GRADIENTS = [
-  "from-indigo-600 to-purple-700",
+  "from-navy-700 to-navy-800",
   "from-emerald-600 to-teal-700",
   "from-amber-500 to-orange-600",
   "from-rose-500 to-pink-600",
@@ -50,12 +51,12 @@ function Sidebar({
   onDeleteWorkspace?: (ws: Workspace) => void;
 }) {
   const [expandedId, setExpandedId] = useState<string | null>(workspaces[0]?.id ?? null);
-  const colors = ["bg-orange-500", "bg-indigo-500", "bg-emerald-500", "bg-amber-500", "bg-rose-500"];
+  const colors = ["bg-orange-500", "bg-navy-700", "bg-emerald-500", "bg-amber-500", "bg-rose-500"];
 
   return (
-    <aside className="w-64 shrink-0 flex flex-col bg-slate-900/80 border-r border-white/10">
+    <aside className="w-64 shrink-0 flex flex-col bg-navy-950/90 border-r border-white/10">
       <div className="p-4 border-b border-white/10">
-        <h2 className="text-slate-300 text-xs font-semibold uppercase tracking-wider">Workspaces</h2>
+        <h2 className="text-navy-300 text-xs font-semibold uppercase tracking-wider">Workspaces</h2>
       </div>
       <nav className="flex-1 overflow-y-auto py-2">
         {workspaces.map((ws, i) => (
@@ -129,7 +130,7 @@ function Sidebar({
                     <path d="M16 3.13a4 4 0 0 1 0 7.75" />
                   </svg>
                   Members
-                  <span className="ml-auto text-indigo-400">+</span>
+                  <span className="ml-auto text-navy-400">+</span>
                 </button>
                 <Link
                   href={`/workspace/${ws.id}`}
@@ -177,8 +178,8 @@ function Sidebar({
         ))}
       </nav>
       <div className="p-3 border-t border-white/10">
-        <div className="rounded-lg bg-slate-800/70 border border-white/10 p-4 relative overflow-hidden">
-          <div className="absolute bottom-0 right-0 w-12 h-12 flex items-center justify-center text-indigo-400/40">
+        <div className="rounded-lg bg-navy-900/80 border border-white/10 p-4 relative overflow-hidden">
+          <div className="absolute bottom-0 right-0 w-12 h-12 flex items-center justify-center text-navy-400/40">
             <svg
               xmlns="http://www.w3.org/2000/svg"
               width="24"
@@ -197,7 +198,7 @@ function Sidebar({
           <p className="text-white/70 text-xs leading-relaxed mb-3">
             Full access, card mirroring, collapsible lists, unlimited boards, AI, and more!
           </p>
-          <button type="button" className="text-indigo-400 text-xs font-medium hover:underline">
+          <button type="button" className="text-navy-400 text-xs font-medium hover:underline">
             Start free trial
           </button>
         </div>
@@ -300,13 +301,13 @@ function CollaboratorsModal({
       onClick={onClose}
     >
       <div
-        className="bg-slate-900 rounded-2xl shadow-2xl w-full max-w-md max-h-[80vh] flex flex-col overflow-hidden border border-white/10"
+        className="bg-navy-950 rounded-2xl shadow-2xl w-full max-w-md max-h-[80vh] flex flex-col overflow-hidden border border-white/10"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between p-4 border-b border-white/10">
           <div className="flex items-center gap-2">
             <h2 className="text-white font-semibold text-lg">Collaborators</h2>
-            <span className="px-2 py-0.5 rounded-full bg-slate-800 text-white/80 text-sm">
+            <span className="px-2 py-0.5 rounded-full bg-navy-900 text-white/80 text-sm">
               {countDisplay}
             </span>
           </div>
@@ -332,7 +333,7 @@ function CollaboratorsModal({
 
         <div className="p-4 border-b border-white/10 space-y-3">
           <div>
-            <div className="text-indigo-400 text-sm font-medium border-b-2 border-indigo-400 pb-1 w-fit">
+            <div className="text-navy-400 text-sm font-medium border-b-2 border-navy-400 pb-1 w-fit">
               Add collaborator
             </div>
             <input
@@ -340,10 +341,10 @@ function CollaboratorsModal({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search users by name or email"
-              className="mt-3 w-full px-3 py-2 rounded-lg bg-slate-800/80 border border-slate-600 text-white text-sm placeholder:text-slate-500 focus:outline-none"
+              className="mt-3 w-full px-3 py-2 rounded-lg bg-navy-900/80 border border-navy-800 text-white text-sm placeholder:text-navy-400 focus:outline-none"
             />
             {searchQuery.trim() && (
-              <div className="mt-2 max-h-40 overflow-y-auto rounded-lg bg-slate-900 border border-slate-700 divide-y divide-slate-700">
+              <div className="mt-2 max-h-40 overflow-y-auto rounded-lg bg-navy-950 border border-navy-800 divide-navy-800">
                 {searching ? (
                   <div className="px-3 py-4 text-white/60 text-sm">Searching…</div>
                 ) : availableToAdd.length === 0 ? (
@@ -366,7 +367,7 @@ function CollaboratorsModal({
                         type="button"
                         onClick={() => handleAddMember(u.auth_id)}
                         disabled={members.length >= MEMBER_LIMIT || addingUserId === u.auth_id}
-                        className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="px-3 py-1.5 rounded-lg bg-navy-700 text-white text-xs font-medium hover:bg-navy-600 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {addingUserId === u.auth_id ? "Adding…" : "Add"}
                       </button>
@@ -383,7 +384,7 @@ function CollaboratorsModal({
           </div>
 
           <div>
-            <div className="text-indigo-400 text-sm font-medium border-b-2 border-indigo-400 pb-1 w-fit">
+            <div className="text-navy-400 text-sm font-medium border-b-2 border-navy-400 pb-1 w-fit">
               Members ({members.length})
             </div>
             <input
@@ -391,7 +392,7 @@ function CollaboratorsModal({
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
               placeholder="Filter by name"
-              className="mt-3 w-full px-3 py-2 rounded-lg bg-slate-800/80 border border-slate-600 text-white text-sm placeholder:text-slate-500 focus:outline-none"
+              className="mt-3 w-full px-3 py-2 rounded-lg bg-navy-900/80 border border-navy-800 text-white text-sm placeholder:text-navy-400 focus:outline-none"
             />
           </div>
         </div>
@@ -430,7 +431,7 @@ function CollaboratorsModal({
                       <p className="text-white/50 text-xs truncate">@{username}</p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
-                      <span className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-800 text-white/90 text-xs">
+                      <span className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-navy-900 text-white/90 text-xs">
                         {isAdmin ? "Admin" : "Member"}
                         {isAdmin && (
                           <svg
@@ -450,7 +451,7 @@ function CollaboratorsModal({
                         <button
                           type="button"
                           onClick={handleLeave}
-                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-800 text-white/90 text-xs hover:bg-red-500/20 hover:text-red-300"
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-navy-900 text-white/90 text-xs hover:bg-red-500/20 hover:text-red-300"
                         >
                           <svg
                             xmlns="http://www.w3.org/2000/svg"
@@ -471,7 +472,7 @@ function CollaboratorsModal({
                         <button
                           type="button"
                           onClick={() => handleKick(m.user_id)}
-                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-800 text-white/90 text-xs hover:bg-red-500/20 hover:text-red-300"
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-navy-900 text-white/90 text-xs hover:bg-red-500/20 hover:text-red-300"
                         >
                           <svg
                             xmlns="http://www.w3.org/2000/svg"
@@ -618,7 +619,7 @@ export default function Dashboard() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-800 via-indigo-900/90 to-slate-900 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-navy-950 via-navy-900/90 to-navy-950 flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
           <div className="w-12 h-12 rounded-2xl bg-white/10 backdrop-blur border border-white/20 animate-pulse" />
           <p className="text-white/80 text-sm font-medium">Loading workspaces…</p>
@@ -628,14 +629,14 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-gradient-to-br from-slate-800 via-indigo-900/80 to-slate-900">
+    <div className="min-h-screen flex flex-col bg-gradient-to-br from-navy-950 via-navy-900/80 to-navy-950">
       <header className="flex items-center justify-between px-6 py-3 bg-white/5 backdrop-blur-md border-b border-white/10 shrink-0">
         <div className="flex items-center gap-4">
           <Link
             href="/dashboard"
-            className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-700 flex items-center justify-center shadow-lg shadow-indigo-500/25"
+            className="flex items-center justify-center shrink-0"
           >
-            <span className="text-white font-bold text-xl">B</span>
+            <Image src="/logo.png" alt="Logo" width={40} height={40} className="w-10 h-10 object-contain" />
           </Link>
           <span className="text-white font-semibold text-lg tracking-tight">Workspaces</span>
         </div>
@@ -720,7 +721,7 @@ export default function Dashboard() {
                       } shrink-0`}
                     />
                     <div className="p-3">
-                      <p className="text-white font-medium truncate group-hover:text-indigo-200">
+                      <p className="text-white font-medium truncate group-hover:text-navy-400">
                         {board.name}
                       </p>
                       <p className="text-white/50 text-xs truncate">
@@ -737,7 +738,7 @@ export default function Dashboard() {
                       value={addBoardName}
                       onChange={(e) => setAddBoardName(e.target.value)}
                       placeholder="Board name"
-                      className="w-full px-3 py-2 rounded-lg bg-slate-800/80 border border-slate-600 text-white text-sm placeholder:text-slate-500 focus:outline-none mb-3"
+                      className="w-full px-3 py-2 rounded-lg bg-navy-900/80 border border-navy-800 text-white text-sm placeholder:text-navy-400 focus:outline-none mb-3"
                       autoFocus
                       onKeyDown={(e) => {
                         if (e.key === "Enter") handleCreateBoard();
@@ -751,7 +752,7 @@ export default function Dashboard() {
                       <button
                         type="button"
                         onClick={handleCreateBoard}
-                        className="px-3 py-2 bg-indigo-600 text-white text-xs font-medium rounded-lg"
+                        className="px-3 py-2 bg-navy-700 text-white text-xs font-medium rounded-lg"
                       >
                         Create
                       </button>
@@ -761,7 +762,7 @@ export default function Dashboard() {
                           setAddBoardWorkspaceId(null);
                           setAddBoardName("");
                         }}
-                        className="px-3 py-2 text-slate-400 text-xs"
+                        className="px-3 py-2 text-navy-400 text-xs"
                       >
                         Cancel
                       </button>
@@ -791,7 +792,7 @@ export default function Dashboard() {
                   );
                   const colors = [
                     "bg-orange-500",
-                    "bg-indigo-500",
+                    "bg-navy-700",
                     "bg-emerald-500",
                     "bg-amber-500",
                     "bg-rose-500",
@@ -892,7 +893,7 @@ export default function Dashboard() {
                               } shrink-0`}
                             />
                             <div className="p-2.5">
-                              <p className="text-white font-medium text-sm truncate group-hover:text-indigo-200">
+                              <p className="text-white font-medium text-sm truncate group-hover:text-navy-400">
                                 {board.name}
                               </p>
                             </div>
@@ -905,7 +906,7 @@ export default function Dashboard() {
                               value={addBoardName}
                               onChange={(e) => setAddBoardName(e.target.value)}
                               placeholder="Board name"
-                              className="w-full px-3 py-2 rounded-lg bg-slate-800/80 border border-slate-600 text-white text-sm placeholder:text-slate-500 focus:outline-none mb-2"
+                              className="w-full px-3 py-2 rounded-lg bg-navy-900/80 border border-navy-800 text-white text-sm placeholder:text-navy-400 focus:outline-none mb-2"
                               autoFocus
                               onKeyDown={(e) => {
                                 if (e.key === "Enter") handleCreateBoard();
@@ -919,7 +920,7 @@ export default function Dashboard() {
                               <button
                                 type="button"
                                 onClick={handleCreateBoard}
-                                className="px-2 py-1.5 bg-indigo-600 text-white text-xs font-medium rounded-lg"
+                                className="px-2 py-1.5 bg-navy-700 text-white text-xs font-medium rounded-lg"
                               >
                                 Create
                               </button>
@@ -929,7 +930,7 @@ export default function Dashboard() {
                                   setAddBoardWorkspaceId(null);
                                   setAddBoardName("");
                                 }}
-                                className="px-2 py-1.5 text-slate-400 text-xs"
+                                className="px-2 py-1.5 text-navy-400 text-xs"
                               >
                                 Cancel
                               </button>
@@ -959,7 +960,7 @@ export default function Dashboard() {
                       value={addWorkspaceName}
                       onChange={(e) => setAddWorkspaceName(e.target.value)}
                       placeholder="Workspace name"
-                      className="w-full px-4 py-2 rounded-xl bg-slate-800/80 border border-slate-600 text-white text-sm placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 mb-3"
+                      className="w-full px-4 py-2 rounded-xl bg-navy-900/80 border border-navy-800 text-white text-sm placeholder:text-navy-400 focus:outline-none focus:ring-1 focus:ring-navy-400 mb-3"
                       autoFocus
                       onKeyDown={(e) => {
                         if (e.key === "Enter") handleCreateWorkspace();
@@ -973,7 +974,7 @@ export default function Dashboard() {
                       <button
                         type="button"
                         onClick={handleCreateWorkspace}
-                        className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-xl hover:bg-indigo-700"
+                        className="px-4 py-2 bg-navy-700 text-white text-sm font-medium rounded-xl hover:bg-navy-600"
                       >
                         Create
                       </button>
@@ -983,7 +984,7 @@ export default function Dashboard() {
                           setShowCreateWorkspace(false);
                           setAddWorkspaceName("");
                         }}
-                        className="px-3 py-2 text-slate-400 hover:text-white text-sm"
+                        className="px-3 py-2 text-navy-400 hover:text-white text-sm"
                       >
                         Cancel
                       </button>

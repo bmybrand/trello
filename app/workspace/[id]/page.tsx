@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import {
   DndContext,
   DragEndEvent,
@@ -85,7 +86,7 @@ function DraggableCard({ card, listId, onDoneChange, onDoneSaved, onEdit }: {
       ref={(n) => { setDragRef(n); setDropRef(n); }}
       {...attributes}
       {...listeners}
-      className={`rounded-xl p-3 bg-white shadow-sm border border-slate-200/80 transition-all ${isOver ? "ring-2 ring-indigo-400" : ""} ${isDragging ? "opacity-50" : ""}`}
+      className={`rounded-xl p-3 bg-white shadow-sm border border-slate-200/80 transition-all ${isOver ? "ring-2 ring-navy-400" : ""} ${isDragging ? "opacity-50" : ""}`}
     >
       {card.coverUrl && (
         <div className="w-full h-16 -mx-3 -mt-3 mb-2 rounded-t-xl overflow-hidden">
@@ -96,14 +97,14 @@ function DraggableCard({ card, listId, onDoneChange, onDoneSaved, onEdit }: {
         <button
           type="button"
           onClick={handleToggleDone}
-          className={`mt-1 w-4 h-4 rounded border-2 shrink-0 flex items-center justify-center ${done ? "bg-indigo-600 border-indigo-600" : "border-slate-300"}`}
+          className={`mt-1 w-4 h-4 rounded border-2 shrink-0 flex items-center justify-center ${done ? "bg-navy-700 border-navy-700" : "border-slate-300"}`}
           aria-label={done ? "Mark not done" : "Mark done"}
         >
           {done && <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><path d="M20 6 9 17l-5-5"/></svg>}
         </button>
         <div className="flex-1 min-w-0">
-          <p className={`text-slate-800 text-sm font-medium break-words ${done ? "line-through text-slate-500" : ""}`}>{card.title}</p>
-          <button type="button" onClick={() => onEdit?.(card)} className="mt-1 text-indigo-600 text-xs font-medium hover:text-indigo-700">Edit</button>
+          <p className={`text-slate-800 text-sm font-medium break-words ${done ? "line-through text-navy-500" : ""}`}>{card.title}</p>
+          <button type="button" onClick={() => onEdit?.(card)} className="mt-1 text-navy-600 text-xs font-medium hover:text-navy-500">Edit</button>
         </div>
       </div>
     </div>
@@ -119,8 +120,8 @@ function CardDragPreview({ card }: { card: Card }) {
         </div>
       )}
       <div className="flex items-start gap-2">
-        {card.done && <span className="mt-1 w-4 h-4 rounded bg-indigo-600 shrink-0 flex items-center justify-center"><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><path d="M20 6 9 17l-5-5"/></svg></span>}
-        <p className={`text-slate-800 text-sm font-medium break-words ${card.done ? "line-through text-slate-500" : ""}`}>{card.title}</p>
+        {card.done && <span className="mt-1 w-4 h-4 rounded bg-navy-700 shrink-0 flex items-center justify-center"><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><path d="M20 6 9 17l-5-5"/></svg></span>}
+        <p className={`text-slate-800 text-sm font-medium break-words ${card.done ? "line-through text-navy-500" : ""}`}>{card.title}</p>
       </div>
     </div>
   );
@@ -146,7 +147,7 @@ function DroppableList({
   const { attributes, listeners, setNodeRef: setDragRef } = useDraggable({ id: list.id, data: { type: "list", listId: list.id } });
   const { setNodeRef: setDropRef, isOver } = useDroppable({ id: list.id, data: { type: "list", listId: list.id } });
   return (
-    <div ref={(n) => { setDragRef(n); setDropRef(n); }} className={`w-[280px] shrink-0 rounded-2xl bg-slate-100/80 backdrop-blur-sm p-4 h-fit border ${isOver ? "border-indigo-400/60" : "border-slate-200/50"} shadow-sm`}>
+    <div ref={(n) => { setDragRef(n); setDropRef(n); }} className={`w-[280px] shrink-0 rounded-2xl bg-slate-100/80 backdrop-blur-sm p-4 h-fit border ${isOver ? "border-navy-400/60" : "border-slate-200/50"} shadow-sm`}>
       <div className="flex items-center gap-2 mb-3" {...attributes} {...listeners}>
         <div className="cursor-grab w-4 h-4 text-slate-400">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="9" cy="5" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="19" r="1"/></svg>
@@ -164,17 +165,17 @@ function DroppableList({
             onChange={(e) => setNewCardTitle(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") addCard(list.id); if (e.key === "Escape") setNewCardListId(null); }}
             placeholder="Card title…"
-            className="w-full px-3 py-2 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400/50 bg-white mb-2"
+            className="w-full px-3 py-2 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-navy-400/50 bg-white mb-2"
             autoFocus
           />
           <div className="flex gap-2">
-            <button type="button" onClick={() => addCard(list.id)} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-xl hover:bg-indigo-700">Add</button>
-            <button type="button" onClick={() => setNewCardListId(null)} className="px-3 py-2 text-slate-500 hover:text-slate-700 rounded-lg">×</button>
+            <button type="button" onClick={() => addCard(list.id)} className="px-4 py-2 bg-navy-700 text-white text-sm font-medium rounded-xl hover:bg-navy-600">Add</button>
+            <button type="button" onClick={() => setNewCardListId(null)} className="px-3 py-2 text-navy-500 hover:text-slate-700 rounded-lg">×</button>
           </div>
         </div>
       ) : (
         <button type="button" onClick={() => setNewCardListId(list.id)} className="mt-2 w-full text-left px-4 py-3 rounded-xl text-slate-600 text-sm font-medium hover:bg-white/60 flex gap-2 border-2 border-dashed border-slate-300/60">
-          <span className="text-indigo-500 font-bold">+</span> Add a card
+          <span className="text-navy-500 font-bold">+</span> Add a card
         </button>
       )}
     </div>
@@ -521,7 +522,7 @@ export default function WorkspacePage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-800 via-indigo-900/90 to-slate-900 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-navy-950 via-navy-900/90 to-navy-950 flex items-center justify-center">
         <div className="w-12 h-12 rounded-2xl bg-white/10 border border-white/20 animate-pulse" />
       </div>
     );
@@ -529,7 +530,7 @@ export default function WorkspacePage() {
 
   if (!workspace) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-800 via-indigo-900/90 to-slate-900 flex flex-col items-center justify-center p-4">
+      <div className="min-h-screen bg-gradient-to-br from-navy-950 via-navy-900/90 to-navy-950 flex flex-col items-center justify-center p-4">
         <p className="text-white/90 mb-4">{addCardError ?? "Workspace not found"}</p>
         <Link href="/dashboard" className="px-5 py-2.5 rounded-xl bg-white/15 text-white font-medium hover:bg-white/25">
           Back to workspaces
@@ -539,10 +540,12 @@ export default function WorkspacePage() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-gradient-to-br from-slate-800 via-indigo-900/80 to-slate-900">
+    <div className="min-h-screen flex flex-col bg-gradient-to-br from-navy-950 via-navy-900/80 to-navy-950">
       <header className="flex items-center justify-between px-6 py-3 bg-white/5 backdrop-blur-md border-b border-white/10 shrink-0">
         <div className="flex items-center gap-4">
-          <Link href="/dashboard" className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-700 flex items-center justify-center text-white font-bold text-xl">B</Link>
+          <Link href="/dashboard" className="flex items-center justify-center shrink-0">
+            <Image src="/logo.png" alt="Logo" width={40} height={40} className="w-10 h-10 object-contain" />
+          </Link>
           <span className="px-3 py-2 text-white text-sm font-medium">
             {workspace?.name ?? "Workspace"}
             {currentBoard && currentBoard.name !== workspace?.name && (
@@ -572,15 +575,15 @@ export default function WorkspacePage() {
                   value={newBoardName}
                   onChange={(e) => setNewBoardName(e.target.value)}
                   placeholder="Board name"
-                  className="px-4 py-2 rounded-xl bg-slate-700 border border-slate-600 text-white"
+                  className="px-4 py-2 rounded-xl bg-navy-800 border border-navy-700 text-white"
                   onKeyDown={(e) => { if (e.key === "Enter") handleCreateBoard(); if (e.key === "Escape") setShowNewBoard(false); }}
                   autoFocus
                 />
-                <button type="button" onClick={handleCreateBoard} className="px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700">Create</button>
-                <button type="button" onClick={() => setShowNewBoard(false)} className="px-4 py-2 text-slate-400">Cancel</button>
+                <button type="button" onClick={handleCreateBoard} className="px-4 py-2 bg-navy-700 text-white rounded-xl hover:bg-navy-600">Create</button>
+                <button type="button" onClick={() => setShowNewBoard(false)} className="px-4 py-2 text-navy-400">Cancel</button>
               </div>
             ) : (
-              <button type="button" onClick={() => setShowNewBoard(true)} className="px-5 py-2.5 rounded-xl bg-indigo-600 text-white font-medium hover:bg-indigo-700">
+              <button type="button" onClick={() => setShowNewBoard(true)} className="px-5 py-2.5 rounded-xl bg-navy-700 text-white font-medium hover:bg-navy-600">
                 Create new board
               </button>
             )}
@@ -615,8 +618,8 @@ export default function WorkspacePage() {
                   <div className="w-[280px] shrink-0 rounded-2xl bg-slate-100/80 p-4 h-fit border border-slate-200/50">
                     <input type="text" value={newListTitle} onChange={(e) => setNewListTitle(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addList(); if (e.key === "Escape") setShowAddList(false); }} placeholder="List title…" className="w-full px-4 py-2.5 rounded-xl border border-slate-300 text-sm mb-3" autoFocus />
                     <div className="flex gap-2">
-                      <button type="button" onClick={addList} className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-xl">Add list</button>
-                      <button type="button" onClick={() => setShowAddList(false)} className="px-3 py-2 text-slate-500">×</button>
+                      <button type="button" onClick={addList} className="px-4 py-2 bg-navy-700 text-white text-sm font-medium rounded-xl">Add list</button>
+                      <button type="button" onClick={() => setShowAddList(false)} className="px-3 py-2 text-navy-500">×</button>
                     </div>
                   </div>
                 ) : (
@@ -639,12 +642,12 @@ export default function WorkspacePage() {
 
       {showBoardPopup && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60" onClick={() => setShowBoardPopup(false)}>
-          <div className="bg-slate-800 rounded-2xl p-6 max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-navy-900 rounded-2xl p-6 max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-lg font-semibold text-white mb-4">Change board</h3>
             <ul className="space-y-2">
               {boards.map((b) => (
                 <li key={b.id}>
-                  <button type="button" onClick={() => { setCurrentBoardId(b.id); setShowBoardPopup(false); }} className={`w-full text-left px-4 py-3 rounded-xl font-medium ${currentBoardId === b.id ? "bg-indigo-600 text-white" : "bg-white/5 text-white/90 hover:bg-white/10"}`}>
+                  <button type="button" onClick={() => { setCurrentBoardId(b.id); setShowBoardPopup(false); }} className={`w-full text-left px-4 py-3 rounded-xl font-medium ${currentBoardId === b.id ? "bg-navy-700 text-white" : "bg-white/5 text-white/90 hover:bg-white/10"}`}>
                     {b.name}
                   </button>
                 </li>
@@ -652,12 +655,12 @@ export default function WorkspacePage() {
             </ul>
             {showNewBoard ? (
               <div className="mt-4 flex gap-2">
-                <input type="text" value={newBoardName} onChange={(e) => setNewBoardName(e.target.value)} placeholder="Board name" className="flex-1 px-4 py-2 rounded-xl bg-slate-700 border border-slate-600 text-white" onKeyDown={(e) => { if (e.key === "Enter") handleCreateBoard(); }} />
-                <button type="button" onClick={handleCreateBoard} className="px-4 py-2 bg-indigo-600 text-white rounded-xl">Create</button>
-                <button type="button" onClick={() => setShowNewBoard(false)} className="px-4 py-2 text-slate-400">Cancel</button>
+                <input type="text" value={newBoardName} onChange={(e) => setNewBoardName(e.target.value)} placeholder="Board name" className="flex-1 px-4 py-2 rounded-xl bg-navy-800 border border-navy-700 text-white" onKeyDown={(e) => { if (e.key === "Enter") handleCreateBoard(); }} />
+                <button type="button" onClick={handleCreateBoard} className="px-4 py-2 bg-navy-700 text-white rounded-xl">Create</button>
+                <button type="button" onClick={() => setShowNewBoard(false)} className="px-4 py-2 text-navy-400">Cancel</button>
               </div>
             ) : (
-              <button type="button" onClick={() => setShowNewBoard(true)} className="mt-4 w-full py-2.5 text-indigo-400 text-sm font-medium">
+              <button type="button" onClick={() => setShowNewBoard(true)} className="mt-4 w-full py-2.5 text-navy-400 text-sm font-medium">
                 + Create new board
               </button>
             )}
@@ -670,34 +673,34 @@ export default function WorkspacePage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => { setEditCard(null); setEditCardListName(""); }}>
           <div className="rounded-2xl shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col bg-white relative" onClick={(e) => e.stopPropagation()}>
             {popupLoading && (
-              <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm">
+              <div className="absolute inset-0 z-10 flex items-center justify-center bg-navy-950/60 backdrop-blur-sm">
                 <div className="w-10 h-10 border-4 border-white/30 border-t-white rounded-full animate-spin" />
               </div>
             )}
-            <div className="bg-slate-200 shrink-0 p-4">
+            <div className="bg-navy-900 shrink-0 p-4">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-slate-700 font-medium">{editCardListName || "Card"}</span>
-                <button type="button" onClick={() => { setEditCard(null); setEditCardListName(""); }} className="p-2 rounded-full bg-slate-600 text-white hover:bg-slate-700">×</button>
+                <span className="text-navy-200 font-medium">{editCardListName || "Card"}</span>
+                <button type="button" onClick={() => { setEditCard(null); setEditCardListName(""); }} className="p-2 rounded-full bg-navy-700 text-white hover:bg-navy-600">×</button>
               </div>
               {editCoverUrl.trim() || (!editCoverRemoved && editCard.coverUrl) ? (
-                <div className="relative aspect-[6/1] bg-slate-300 rounded-lg overflow-hidden">
+                <div className="relative aspect-[6/1] bg-navy-800 rounded-lg overflow-hidden">
                   <img src={editCoverUrl.trim() || editCard.coverUrl || ""} alt="Cover" className="w-full h-full object-contain" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
                   <button type="button" onClick={() => { setEditCoverUrl(""); setEditCoverRemoved(true); }} className="absolute bottom-2 right-2 px-2 py-1 rounded-lg bg-black/60 text-white text-xs">Remove</button>
                 </div>
               ) : (
-                <div className="aspect-[6/1] bg-slate-300 rounded-lg flex items-center justify-center text-slate-500 text-sm">No cover</div>
+                <div className="aspect-[6/1] bg-navy-800 rounded-lg flex items-center justify-center text-navy-400 text-sm">No cover</div>
               )}
             </div>
-            <div className="bg-slate-800 flex-1 overflow-y-auto p-5 flex gap-6">
+            <div className="bg-navy-900 flex-1 overflow-y-auto p-5 flex gap-6">
               <div className="flex-1 min-w-0">
-                <input type="text" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} placeholder="Card title" className="w-full bg-transparent text-white font-semibold text-base mb-4 focus:outline-none placeholder:text-slate-500" onBlur={() => { if (editCard.itemId == null) return; const newTitle = editTitle.trim() || editCard.title; const prevTitle = editCard.title; if (newTitle === prevTitle) return; setLists((prev) => prev.map((l) => ({ ...l, cards: l.cards.map((c) => (c.id === editCard.id ? { ...c, title: newTitle } : c)) }))); updateItem(editCard.itemId, { name: newTitle }).then(({ error }) => { if (error) setAddCardError(error.message); else { if (authUserId) createItemActivity(editCard.itemId!, authUserId, "title_updated", { previous_title: prevTitle, new_title: newTitle }).catch(() => {}); broadcastRefresh(); } }); }} onKeyDown={(e) => { if (e.key !== "Enter") return; (e.target as HTMLInputElement).blur(); }} />
-                <label className="block text-slate-400 text-xs font-medium mb-1">Description</label>
-                <textarea value={editDescription} onChange={(e) => setEditDescription(e.target.value)} placeholder="Add description…" rows={4} className="w-full px-3 py-2 rounded-lg bg-slate-700/80 border border-slate-600 text-white text-sm placeholder:text-slate-500 focus:outline-none resize-none" />
+                <input type="text" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} placeholder="Card title" className="w-full bg-transparent text-white font-semibold text-base mb-4 focus:outline-none placeholder:text-navy-400" onBlur={() => { if (editCard.itemId == null) return; const newTitle = editTitle.trim() || editCard.title; const prevTitle = editCard.title; if (newTitle === prevTitle) return; setLists((prev) => prev.map((l) => ({ ...l, cards: l.cards.map((c) => (c.id === editCard.id ? { ...c, title: newTitle } : c)) }))); updateItem(editCard.itemId, { name: newTitle }).then(({ error }) => { if (error) setAddCardError(error.message); else { if (authUserId) createItemActivity(editCard.itemId!, authUserId, "title_updated", { previous_title: prevTitle, new_title: newTitle }).catch(() => {}); broadcastRefresh(); } }); }} onKeyDown={(e) => { if (e.key !== "Enter") return; (e.target as HTMLInputElement).blur(); }} />
+                <label className="block text-navy-400 text-xs font-medium mb-1">Description</label>
+                <textarea value={editDescription} onChange={(e) => setEditDescription(e.target.value)} placeholder="Add description…" rows={4} className="w-full px-3 py-2 rounded-lg bg-navy-800/80 border border-navy-700 text-white text-sm placeholder:text-navy-400 focus:outline-none resize-none" />
               </div>
               <div className="w-80 shrink-0">
                 <h4 className="text-white/90 font-medium mb-3">Comments and activity</h4>
-                <button type="button" onClick={() => setShowDetails((prev) => !prev)} className="mb-3 px-3 py-2 rounded-lg bg-slate-700 text-white text-sm">{showDetails ? "Hide details" : "Show details"}</button>
-                <input type="text" value={newCommentText} onChange={(e) => setNewCommentText(e.target.value)} placeholder="Write a comment…" className="w-full px-3 py-2 rounded-lg bg-slate-700/80 border border-slate-600 text-white text-sm mb-2 focus:outline-none" onKeyDown={(e) => { if (e.key !== "Enter") return; e.preventDefault(); if (!newCommentText.trim() || !editCard?.itemId || !authUserId) return; createItemComment(editCard.itemId, authUserId, newCommentText.trim()).then(({ data, error }) => { if (error) setAddCardError(error.message); else if (data) { commentsJustAddedRef.current = Date.now(); setItemComments((prev) => [{ ...data, full_name: user?.full_name ?? null }, ...prev]); setNewCommentText(""); } }); }} />
+                <button type="button" onClick={() => setShowDetails((prev) => !prev)} className="mb-3 px-3 py-2 rounded-lg bg-navy-800 text-white text-sm">{showDetails ? "Hide details" : "Show details"}</button>
+                <input type="text" value={newCommentText} onChange={(e) => setNewCommentText(e.target.value)} placeholder="Write a comment…" className="w-full px-3 py-2 rounded-lg bg-navy-800/80 border border-navy-700 text-white text-sm mb-2 focus:outline-none" onKeyDown={(e) => { if (e.key !== "Enter") return; e.preventDefault(); if (!newCommentText.trim() || !editCard?.itemId || !authUserId) return; createItemComment(editCard.itemId, authUserId, newCommentText.trim()).then(({ data, error }) => { if (error) setAddCardError(error.message); else if (data) { commentsJustAddedRef.current = Date.now(); setItemComments((prev) => [{ ...data, full_name: user?.full_name ?? null }, ...prev]); setNewCommentText(""); } }); }} />
                 <div className="space-y-3 max-h-64 overflow-y-auto">
                   {(() => {
                     const commentsForFeed = itemComments.map((c) => ({ type: "comment" as const, ...c }));
@@ -710,25 +713,25 @@ export default function WorkspacePage() {
                         const c = entry;
                         return (
                           <div key={`c-${c.id}`} className="flex gap-2">
-                            <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white text-xs font-semibold shrink-0">{initials}</div>
+                            <div className="w-8 h-8 rounded-full bg-navy-700 flex items-center justify-center text-white text-xs font-semibold shrink-0">{initials}</div>
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2 text-sm">
                                 <span className="text-white/90 font-medium">{name}</span>
-                                <span className="text-slate-400 text-xs">{new Date(c.created_at).toLocaleString()}</span>
+                                <span className="text-navy-400 text-xs">{new Date(c.created_at).toLocaleString()}</span>
                               </div>
                               {editingCommentId === c.id ? (
                                 <div className="mt-1 flex gap-2">
-                                  <input type="text" value={editingCommentText} onChange={(e) => setEditingCommentText(e.target.value)} className="flex-1 px-2 py-1 rounded bg-slate-700 text-white text-sm" autoFocus />
-                                  <button type="button" onClick={() => updateItemComment(c.id, editingCommentText).then(({ error }) => { if (error) setAddCardError(error.message); else { setItemComments((prev) => prev.map((x) => (x.id === c.id ? { ...x, comment: editingCommentText } : x))); setEditingCommentId(null); } })} className="text-indigo-400 text-xs">Save</button>
-                                  <button type="button" onClick={() => setEditingCommentId(null)} className="text-slate-400 text-xs">Cancel</button>
+                                  <input type="text" value={editingCommentText} onChange={(e) => setEditingCommentText(e.target.value)} className="flex-1 px-2 py-1 rounded bg-navy-800 text-white text-sm" autoFocus />
+                                  <button type="button" onClick={() => updateItemComment(c.id, editingCommentText).then(({ error }) => { if (error) setAddCardError(error.message); else { setItemComments((prev) => prev.map((x) => (x.id === c.id ? { ...x, comment: editingCommentText } : x))); setEditingCommentId(null); } })} className="text-navy-400 text-xs">Save</button>
+                                  <button type="button" onClick={() => setEditingCommentId(null)} className="text-navy-400 text-xs">Cancel</button>
                                 </div>
                               ) : (
-                                <p className="mt-1 px-3 py-2 rounded-lg bg-slate-700/80 text-white/90 text-sm">{c.comment}</p>
+                                <p className="mt-1 px-3 py-2 rounded-lg bg-navy-800/80 text-white/90 text-sm">{c.comment}</p>
                               )}
                               {editingCommentId !== c.id && authUserId === c.user_id && (
                                 <div className="flex gap-2 mt-1 text-xs">
-                                  <button type="button" onClick={() => { setEditingCommentId(c.id); setEditingCommentText(c.comment); }} className="text-slate-400 hover:text-white">Edit</button>
-                                  <span className="text-slate-500">·</span>
+                                  <button type="button" onClick={() => { setEditingCommentId(c.id); setEditingCommentText(c.comment); }} className="text-navy-400 hover:text-white">Edit</button>
+                                  <span className="text-navy-500">·</span>
                                   <button type="button" onClick={() => deleteItemComment(c.id).then(({ error }) => { if (error) setAddCardError(error.message); else setItemComments((prev) => prev.filter((x) => x.id !== c.id)); })} className="text-slate-400 hover:text-red-400">Delete</button>
                                 </div>
                               )}
@@ -742,10 +745,10 @@ export default function WorkspacePage() {
                         : a.action_type === "title_updated" ? "updated the title" : a.action_type === "description_updated" ? "updated the description" : a.action_type.replace(/_/g, " ");
                       return (
                         <div key={`a-${a.id}`} className="flex gap-2">
-                          <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white text-xs font-semibold shrink-0">{initials}</div>
+                          <div className="w-8 h-8 rounded-full bg-navy-700 flex items-center justify-center text-white text-xs font-semibold shrink-0">{initials}</div>
                           <div>
                             <p className="text-white/90 text-sm"><span className="font-medium">{name}</span> {activityText}</p>
-                            <span className="text-slate-400 text-xs">{new Date(a.created_at).toLocaleString()}</span>
+                            <span className="text-navy-400 text-xs">{new Date(a.created_at).toLocaleString()}</span>
                           </div>
                         </div>
                       );
