@@ -12,6 +12,7 @@ export type WorkspaceMember = {
   user_id: string;
   created_at: string;
   full_name?: string | null;
+  app_role?: string | null;
 };
 
 export type Board = {
@@ -28,6 +29,7 @@ export type BoardMember = {
   role: string | null;
   created_at: string;
   full_name?: string | null;
+  app_role?: string | null;
 };
 
 /** Get workspaces the user is a member of. */
@@ -67,22 +69,13 @@ export async function getWorkspace(workspaceId: string): Promise<{
   return { data: data as Workspace, error: null };
 }
 
-/** Only this user can create workspaces. Hardcoded admin. */
-const ADMIN_CAN_CREATE_WORKSPACE = "mughis siddiqui";
-
-/** Create a workspace and add the creator as a member. Only the admin (Mughis Siddiqui) can create. */
+/** Create a workspace and add the creator as a member. Only users with app_role 'admin' can create. */
 export async function createWorkspace(
   name: string,
   creatorUserId: string
 ): Promise<{ data: Workspace | null; error: Error | null }> {
   const supabase = createClient();
-  const { data: userRow } = await supabase
-    .from("users")
-    .select("full_name")
-    .eq("auth_id", creatorUserId)
-    .single();
-  const fullName = ((userRow as { full_name?: string } | null)?.full_name ?? "").toLowerCase().trim();
-  if (fullName !== ADMIN_CAN_CREATE_WORKSPACE.toLowerCase()) {
+  if (!(await isAdmin(supabase, creatorUserId))) {
     return { data: null, error: new Error("Only the admin can create workspaces.") };
   }
   const { data: created, error: workspaceError } = await supabase
@@ -110,11 +103,18 @@ export async function createWorkspace(
   };
 }
 
-/** Check if user (auth_id) is the admin. Only admin can delete workspaces/boards and add members. */
+/** Check if user (auth_id) has app_role 'admin' or 'superadmin'. */
 async function isAdmin(supabase: ReturnType<typeof createClient>, authId: string): Promise<boolean> {
-  const { data } = await supabase.from("users").select("full_name").eq("auth_id", authId).single();
-  const name = ((data as { full_name?: string } | null)?.full_name ?? "").toLowerCase().trim();
-  return name === ADMIN_CAN_CREATE_WORKSPACE.toLowerCase();
+  const { data } = await supabase.from("users").select("app_role").eq("auth_id", authId).single();
+  const role = ((data as { app_role?: string } | null)?.app_role ?? "").toLowerCase().trim();
+  return role === "admin" || role === "superadmin";
+}
+
+/** Check if user (auth_id) has app_role 'superadmin'. */
+export async function isSuperAdmin(supabase: ReturnType<typeof createClient>, authId: string): Promise<boolean> {
+  const { data } = await supabase.from("users").select("app_role").eq("auth_id", authId).single();
+  const role = ((data as { app_role?: string } | null)?.app_role ?? "").toLowerCase().trim();
+  return role === "superadmin";
 }
 
 /** Delete a workspace and all related data (boards, members, board cards, list order, cards, items, comments, activities). Only admin can delete. */
@@ -234,15 +234,18 @@ export async function getWorkspaceMembers(workspaceId: string): Promise<{
   const userIds = [...new Set((rows as { user_id: string }[]).map((r) => r.user_id))];
   const { data: users } = await supabase
     .from("users")
-    .select("auth_id, full_name")
+    .select("auth_id, full_name, app_role")
     .in("auth_id", userIds);
-  const nameByAuthId = new Map(
-    (users ?? []).map((u: { auth_id: string; full_name: string | null }) => [u.auth_id, u.full_name])
+  const byAuthId = new Map(
+    (users ?? []).map((u: { auth_id: string; full_name: string | null; app_role: string | null }) => [
+      u.auth_id,
+      { full_name: u.full_name, app_role: u.app_role },
+    ])
   );
-  const data = (rows as WorkspaceMember[]).map((r) => ({
-    ...r,
-    full_name: nameByAuthId.get(r.user_id) ?? null,
-  }));
+  const data = (rows as WorkspaceMember[]).map((r) => {
+    const u = byAuthId.get(r.user_id);
+    return { ...r, full_name: u?.full_name ?? null, app_role: u?.app_role ?? null };
+  });
   return { data, error: null };
 }
 
@@ -334,14 +337,17 @@ export async function getBoardMembers(boardId: string): Promise<{
   if (error) return { data: null, error };
   if (!rows?.length) return { data: [], error: null };
   const userIds = [...new Set((rows as { user_id: string }[]).map((r) => r.user_id))];
-  const { data: users } = await supabase.from("users").select("auth_id, full_name").in("auth_id", userIds);
-  const nameByAuthId = new Map(
-    (users ?? []).map((u: { auth_id: string; full_name: string | null }) => [u.auth_id, u.full_name])
+  const { data: users } = await supabase.from("users").select("auth_id, full_name, app_role").in("auth_id", userIds);
+  const byAuthId = new Map(
+    (users ?? []).map((u: { auth_id: string; full_name: string | null; app_role: string | null }) => [
+      u.auth_id,
+      { full_name: u.full_name, app_role: u.app_role },
+    ])
   );
-  const data = (rows as BoardMember[]).map((r) => ({
-    ...r,
-    full_name: nameByAuthId.get(r.user_id) ?? null,
-  }));
+  const data = (rows as BoardMember[]).map((r) => {
+    const u = byAuthId.get(r.user_id);
+    return { ...r, full_name: u?.full_name ?? null, app_role: u?.app_role ?? null };
+  });
   return { data, error: null };
 }
 
@@ -375,10 +381,10 @@ export async function removeBoardMember(
   if (!(await isAdmin(supabase, requesterAuthId))) {
     return { error: new Error("Only the admin can manage board access.") };
   }
-  const { data: userRow } = await supabase.from("users").select("full_name").eq("auth_id", userId).single();
-  const fullName = ((userRow as { full_name?: string } | null)?.full_name ?? "").toLowerCase().trim();
-  if (fullName === ADMIN_CAN_CREATE_WORKSPACE.toLowerCase()) {
-    return { error: new Error("The admin cannot be removed from board access.") };
+  const { data: userRow } = await supabase.from("users").select("app_role").eq("auth_id", userId).single();
+  const role = ((userRow as { app_role?: string } | null)?.app_role ?? "").toLowerCase().trim();
+  if (role === "admin" || role === "superadmin") {
+    return { error: new Error("Admins and the superadmin cannot be removed from board access.") };
   }
   const { error } = await supabase
     .from("board_members")
@@ -407,21 +413,18 @@ export async function createBoard(
   if (error) return { data: null, error };
   if (created?.id) {
     const bid = String(created.id);
-    const toAdd = new Set<string>();
-    if (creatorUserId) toAdd.add(creatorUserId);
-    const { data: adminRow } = await supabase
+    const { data: adminRows } = await supabase
       .from("users")
       .select("auth_id")
-      .ilike("full_name", ADMIN_CAN_CREATE_WORKSPACE)
-      .limit(1)
-      .maybeSingle();
-    const adminAuthId = (adminRow as { auth_id?: string } | null)?.auth_id;
-    if (adminAuthId) toAdd.add(adminAuthId);
+      .in("app_role", ["admin", "superadmin"]);
+    const adminAuthIds = new Set((adminRows ?? []).map((r: { auth_id: string }) => r.auth_id));
+    const toAdd = new Set<string>(adminAuthIds);
+    if (creatorUserId) toAdd.add(creatorUserId);
     for (const uid of toAdd) {
       await supabase.from("board_members").insert({
         board_id: bid,
         user_id: uid,
-        role: uid === adminAuthId ? "admin" : "member",
+        role: adminAuthIds.has(uid) ? "admin" : "member",
         created_at: new Date().toISOString(),
       });
     }
@@ -487,6 +490,7 @@ export type AppUser = {
   full_name: string | null;
   email: string | null;
   app_role: string | null;
+  profile_image: string | null;
   created_at: string;
 };
 
@@ -501,27 +505,90 @@ export async function getAllUsers(requesterAuthId: string): Promise<{
   }
   const { data, error } = await supabase
     .from("users")
-    .select("id, auth_id, full_name, email, app_role, created_at")
+    .select("id, auth_id, full_name, email, app_role, profile_image, created_at")
     .order("created_at", { ascending: false });
   if (error) return { data: null, error };
   return { data: (data ?? []) as AppUser[], error: null };
 }
 
-/** Update a user's full_name, email, or app_role. Only admin can call. */
+/** Update a user's full_name, email, app_role, or profile_image. Admin can update users (not other admins' roles); superadmin can change anyone. Only one superadmin; transferring it demotes the current superadmin to admin. */
 export async function updateUser(
   authId: string,
-  updates: { full_name?: string; email?: string; app_role?: string },
+  updates: { full_name?: string; email?: string; app_role?: string; profile_image?: string },
   requesterAuthId: string
 ): Promise<{ error: Error | null }> {
   const supabase = createClient();
-  if (!(await isAdmin(supabase, requesterAuthId))) {
-    return { error: new Error("Only the admin can manage users.") };
+  const [callerRow, targetRow] = await Promise.all([
+    supabase.from("users").select("app_role").eq("auth_id", requesterAuthId).single(),
+    supabase.from("users").select("app_role").eq("auth_id", authId).single(),
+  ]);
+  const callerRole = ((callerRow.data as { app_role?: string } | null)?.app_role ?? "").toLowerCase().trim();
+  const targetRole = ((targetRow.data as { app_role?: string } | null)?.app_role ?? "").toLowerCase().trim();
+  const isSelf = authId === requesterAuthId;
+  const callerIsAdmin = callerRole === "admin" || callerRole === "superadmin";
+  const callerIsSuperAdmin = callerRole === "superadmin";
+
+  if (!callerIsAdmin && !isSelf) {
+    return { error: new Error("You can only update your own profile.") };
   }
+
   const payload: Record<string, unknown> = {};
   if (updates.full_name !== undefined) payload.full_name = updates.full_name.trim();
   if (updates.email !== undefined) payload.email = updates.email.trim();
-  if (updates.app_role !== undefined) payload.app_role = updates.app_role.trim();
+  if (updates.profile_image !== undefined) payload.profile_image = updates.profile_image;
+
+  // Role change rules
+  if (updates.app_role !== undefined) {
+    const newRole = updates.app_role.trim().toLowerCase();
+    if (callerIsAdmin && !callerIsSuperAdmin) {
+      // Caller is admin (not superadmin): cannot change role of admin or superadmin
+      if (targetRole === "admin" || targetRole === "superadmin") {
+        return { error: new Error("Admins cannot change the role of other admins or the superadmin.") };
+      }
+      if (newRole !== "user" && newRole !== "admin") {
+        return { error: new Error("Only the superadmin can assign the superadmin role.") };
+      }
+      payload.app_role = newRole;
+    } else if (callerIsSuperAdmin) {
+      if (newRole === "superadmin" && authId !== requesterAuthId) {
+        // Transfer superadmin: demote all superadmins to admin, then set target to superadmin
+        const { error: demoteErr } = await supabase
+          .from("users")
+          .update({ app_role: "admin" })
+          .eq("app_role", "superadmin");
+        if (demoteErr) return { error: demoteErr };
+        const { error: promoteErr } = await supabase
+          .from("users")
+          .update({ app_role: "superadmin", ...payload })
+          .eq("auth_id", authId);
+        if (promoteErr) return { error: promoteErr };
+        return { error: null };
+      }
+      payload.app_role = newRole;
+    }
+  }
+
   if (Object.keys(payload).length === 0) return { error: null };
   const { error } = await supabase.from("users").update(payload).eq("auth_id", authId);
   return { error };
+}
+
+/** Get a single user by auth_id. Users can fetch their own; admin can fetch any. */
+export async function getUserByAuthId(
+  authId: string,
+  requesterAuthId: string
+): Promise<{ data: AppUser | null; error: Error | null }> {
+  const supabase = createClient();
+  const admin = await isAdmin(supabase, requesterAuthId);
+  const isSelf = authId === requesterAuthId;
+  if (!admin && !isSelf) {
+    return { data: null, error: new Error("You can only view your own profile.") };
+  }
+  const { data, error } = await supabase
+    .from("users")
+    .select("id, auth_id, full_name, email, app_role, profile_image, created_at")
+    .eq("auth_id", authId)
+    .single();
+  if (error) return { data: null, error };
+  return { data: data as AppUser, error: null };
 }

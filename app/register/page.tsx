@@ -18,9 +18,9 @@ export default function RegisterPage() {
         return;
       }
       const supabase = createClient();
-      const { data } = await supabase.from("users").select("full_name").eq("auth_id", session.user.id).single();
-      const name = ((data as { full_name?: string } | null)?.full_name ?? "").toLowerCase().trim();
-      setIsAdmin(name === "mughis siddiqui");
+      const { data } = await supabase.from("users").select("app_role").eq("auth_id", session.user.id).single();
+      const appRole = ((data as { app_role?: string | null } | null)?.app_role ?? "").toLowerCase().trim();
+      setIsAdmin(appRole === "admin" || appRole === "superadmin");
       setChecking(false);
     })();
   }, [router]);

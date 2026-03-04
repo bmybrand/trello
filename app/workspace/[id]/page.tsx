@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { useRouter, useParams } from "next/navigation";
+import { useRouter, useParams, usePathname } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import {
@@ -324,8 +324,9 @@ function DroppableList({
 export default function WorkspacePage() {
   const router = useRouter();
   const params = useParams();
+  const pathname = usePathname();
   const workspaceId = params.id as string;
-  const [user, setUser] = useState<{ email?: string; full_name?: string } | null>(null);
+  const [user, setUser] = useState<{ email?: string; full_name?: string; profile_image?: string | null; app_role?: string | null } | null>(null);
   const [authUserId, setAuthUserId] = useState<string | null>(null);
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -357,12 +358,12 @@ export default function WorkspacePage() {
   const [editingCommentId, setEditingCommentId] = useState<number | null>(null);
   const [editingCommentText, setEditingCommentText] = useState("");
   const [popupLoading, setPopupLoading] = useState(false);
+  const [showProfileExpanded, setShowProfileExpanded] = useState(false);
   const coverFileInputRef = useRef<HTMLInputElement>(null);
   const commentsJustAddedRef = useRef<number>(0);
   const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
 
-  const ADMIN_CAN_CREATE_WORKSPACE = "mughis siddiqui";
-  const isAdmin = (user?.full_name ?? "").toLowerCase().trim() === ADMIN_CAN_CREATE_WORKSPACE.toLowerCase();
+  const isAdmin = ((user?.app_role ?? "").toLowerCase().trim() === "admin") || ((user?.app_role ?? "").toLowerCase().trim() === "superadmin");
   const currentBoard = boards.find((b) => b.id === currentBoardId);
   const lists = currentBoardId ? (boardData[currentBoardId] ?? getEmptyListsForBoard(currentBoardId)) : [];
   const setLists = (updater: (prev: List[]) => List[]) => {
@@ -376,14 +377,27 @@ export default function WorkspacePage() {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
   const broadcastRefresh = () => broadcastChannelRef.current?.postMessage({ type: "broadcast", event: "refresh" });
 
+  const refetchUser = async () => {
+    if (!authUserId) return;
+    const supabase = createClient();
+    const { data: userRow } = await supabase.from("users").select("full_name, profile_image, app_role").eq("auth_id", authUserId).single();
+    const row = userRow as { full_name?: string; profile_image?: string | null; app_role?: string | null } | null;
+    setUser((prev) =>
+      prev
+        ? { ...prev, full_name: (row?.full_name as string) ?? prev.full_name, profile_image: row?.profile_image ?? null, app_role: row?.app_role ?? null }
+        : prev
+    );
+  };
+
   useEffect(() => {
     (async () => {
       const session = await getSessionWithRetry(500);
       if (!session?.user) { router.replace("/login"); return; }
       const u = session.user;
       const supabase = createClient();
-      const { data: userRow } = await supabase.from("users").select("full_name").eq("auth_id", u.id).single();
-      setUser({ email: u.email ?? undefined, full_name: (userRow?.full_name as string) ?? (u.user_metadata?.full_name as string) ?? undefined });
+      const { data: userRow } = await supabase.from("users").select("full_name, profile_image, app_role").eq("auth_id", u.id).single();
+      const row = userRow as { full_name?: string; profile_image?: string | null; app_role?: string | null } | null;
+      setUser({ email: u.email ?? undefined, full_name: (row?.full_name as string) ?? (u.user_metadata?.full_name as string) ?? undefined, profile_image: row?.profile_image ?? null, app_role: row?.app_role ?? null });
       setAuthUserId(u.id);
 
       const [wsRes, wsListRes, boardsRes, memberRes] = await Promise.all([
@@ -441,6 +455,29 @@ export default function WorkspacePage() {
       setLoading(false);
     })();
   }, [workspaceId, router]);
+
+  useEffect(() => {
+    if (!authUserId) return;
+    const onVisible = () => refetchUser();
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [authUserId]);
+
+  // BroadcastChannel: sync profile updates from Settings (same or other tab)
+  useEffect(() => {
+    if (!authUserId) return;
+    const ch = new BroadcastChannel("register-profile");
+    const handler = (e: MessageEvent) => {
+      if (e.data?.type === "profile-updated") refetchUser();
+    };
+    ch.addEventListener("message", handler);
+    return () => { ch.removeEventListener("message", handler); ch.close(); };
+  }, [authUserId]);
+
+  // Refetch user when navigating back to workspace (e.g. from Settings)
+  useEffect(() => {
+    if (pathname?.startsWith("/workspace/") && authUserId) refetchUser();
+  }, [pathname, authUserId]);
 
   useEffect(() => {
     if (!currentBoardId || boardData[currentBoardId] !== undefined) return;
@@ -1085,12 +1122,48 @@ export default function WorkspacePage() {
           </span>
         </div>
         <div className="flex items-center gap-4">
-          <span className="text-white/90 text-sm truncate max-w-[180px]" title={user?.email}>{user?.full_name ?? user?.email}</span>
+          <button
+            type="button"
+            onClick={() => setShowProfileExpanded(true)}
+            className="flex items-center gap-3 rounded-lg hover:bg-white/5 px-2 py-1.5 -mx-2 transition-colors cursor-pointer"
+          >
+            <div className="w-8 h-8 rounded-full overflow-hidden bg-navy-800 flex items-center justify-center shrink-0">
+              {user?.profile_image && String(user.profile_image).trim() ? (
+                <img src={user.profile_image} alt="" className="w-full h-full object-cover" />
+              ) : (
+                <span className="text-white/60 text-sm font-medium">{(user?.full_name ?? user?.email ?? "?").charAt(0).toUpperCase()}</span>
+              )}
+            </div>
+            <span className="text-white/90 text-sm truncate max-w-[180px]" title={user?.email}>{user?.full_name ?? user?.email}</span>
+          </button>
           <button type="button" onClick={handleSignOut} className="px-4 py-2 rounded-xl bg-white/10 text-white text-sm font-medium hover:bg-white/20">
             Sign out
           </button>
         </div>
       </header>
+
+      {showProfileExpanded && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-profile-overlay-in"
+          onClick={() => setShowProfileExpanded(false)}
+        >
+          <div
+            className="relative group cursor-pointer animate-profile-image-in"
+            onClick={(e) => { e.stopPropagation(); router.push("/settings"); setShowProfileExpanded(false); }}
+          >
+            <div className="w-56 h-56 sm:w-72 sm:h-72 md:w-96 md:h-96 rounded-full overflow-hidden bg-navy-800 flex items-center justify-center border-4 border-white/20 shadow-2xl">
+              {user?.profile_image && String(user.profile_image).trim() ? (
+                <img src={user.profile_image} alt="" className="w-full h-full object-cover" />
+              ) : (
+                <span className="text-white/60 text-6xl sm:text-7xl md:text-8xl font-medium">{(user?.full_name ?? user?.email ?? "?").charAt(0).toUpperCase()}</span>
+              )}
+            </div>
+            <div className="absolute inset-0 rounded-full bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+              <span className="text-white font-medium text-base sm:text-lg">Update profile</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       <main className="flex-1 overflow-x-auto overflow-y-auto p-6 pb-20">
         {addCardError && (

@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient, createServiceClient } from "@/lib/supabase";
 
-const ADMIN_CAN_CREATE_WORKSPACE = "mughis siddiqui";
-
 export async function POST(request: Request) {
   try {
     const authHeader = request.headers.get("Authorization");
@@ -17,12 +15,12 @@ export async function POST(request: Request) {
     }
     const { data: userRow } = await supabase
       .from("users")
-      .select("full_name")
+      .select("app_role")
       .eq("auth_id", user.id)
       .single();
-    const fullName = ((userRow as { full_name?: string } | null)?.full_name ?? "").toLowerCase().trim();
-    if (fullName !== ADMIN_CAN_CREATE_WORKSPACE.toLowerCase()) {
-      return NextResponse.json({ error: "Only the admin can update passwords" }, { status: 403 });
+    const appRole = ((userRow as { app_role?: string | null } | null)?.app_role ?? "").toLowerCase().trim();
+    if (appRole !== "admin" && appRole !== "superadmin") {
+      return NextResponse.json({ error: "Only admins can update passwords" }, { status: 403 });
     }
     const body = await request.json();
     const { authId, newPassword } = body as { authId?: string; newPassword?: string };

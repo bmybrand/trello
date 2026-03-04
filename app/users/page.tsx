@@ -1,20 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState, useCallback } from "react";
+import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase";
 import { getSessionWithRetry } from "@/lib/supabase";
 import { getAllUsers, updateUser, type AppUser } from "@/lib/workspace-storage";
 
-const ADMIN_CAN_CREATE_WORKSPACE = "mughis siddiqui";
-
 function EditUserModal({
   user,
+  currentUserAuthId,
+  currentUserIsSuperAdmin,
   onClose,
   onSaved,
 }: {
   user: AppUser;
+  currentUserAuthId: string;
+  currentUserIsSuperAdmin: boolean;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -24,8 +26,24 @@ function EditUserModal({
   const [newPassword, setNewPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showSuperAdminConfirm, setShowSuperAdminConfirm] = useState(false);
 
-  const handleSave = async () => {
+  const targetIsAdminOrSuperAdmin =
+    (user.app_role ?? "").toLowerCase().trim() === "admin" ||
+    (user.app_role ?? "").toLowerCase().trim() === "superadmin";
+  const canChangeRole = currentUserIsSuperAdmin || (currentUserIsSuperAdmin === false && !targetIsAdminOrSuperAdmin);
+  const roleOptions: { value: string; label: string }[] = currentUserIsSuperAdmin
+    ? [
+        { value: "user", label: "User" },
+        { value: "admin", label: "Admin" },
+        { value: "superadmin", label: "Superadmin" },
+      ]
+    : [
+        { value: "user", label: "User" },
+        { value: "admin", label: "Admin" },
+      ];
+
+  const handleSave = async (skipConfirm = false) => {
     setLoading(true);
     setError(null);
     const session = await getSessionWithRetry();
@@ -34,6 +52,16 @@ function EditUserModal({
     if (!authUserId) {
       setError("Not authenticated");
       setLoading(false);
+      return;
+    }
+    const newRole = (appRole ?? "").trim().toLowerCase();
+    const isTransferSuperAdmin =
+      currentUserIsSuperAdmin &&
+      newRole === "superadmin" &&
+      user.auth_id !== currentUserAuthId;
+    if (isTransferSuperAdmin && !skipConfirm) {
+      setLoading(false);
+      setShowSuperAdminConfirm(true);
       return;
     }
     const { error: err } = await updateUser(
@@ -63,9 +91,43 @@ function EditUserModal({
       }
     }
     setLoading(false);
+    setShowSuperAdminConfirm(false);
     onSaved();
     onClose();
   };
+
+  if (showSuperAdminConfirm) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60" onClick={() => setShowSuperAdminConfirm(false)}>
+        <div
+          className="bg-navy-950 rounded-2xl shadow-2xl w-full max-w-md border border-white/10 overflow-hidden p-6"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <h3 className="text-white font-semibold text-lg mb-2">Transfer Superadmin?</h3>
+          <p className="text-white/80 text-sm mb-4">
+            You will be demoted to admin and lose superadmin rights. Only one superadmin can exist. Are you sure?
+          </p>
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={() => handleSave(true)}
+              disabled={loading}
+              className="flex-1 bg-amber-600 text-white p-3 rounded-xl font-semibold hover:bg-amber-500 transition disabled:opacity-60"
+            >
+              {loading ? "Saving…" : "Yes, transfer"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowSuperAdminConfirm(false)}
+              className="px-4 py-3 rounded-xl text-white/70 hover:bg-white/10"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60" onClick={onClose}>
@@ -114,13 +176,26 @@ function EditUserModal({
           </div>
           <div>
             <label className="block text-white/60 text-sm mb-1">Role</label>
-            <input
-              type="text"
-              value={appRole}
-              onChange={(e) => setAppRole(e.target.value)}
-              className="w-full rounded-xl p-3 bg-navy-900/80 border border-navy-800 text-white placeholder:text-navy-400 focus:outline-none focus:ring-1 focus:ring-navy-400"
-              placeholder="e.g. developer, designer, project_manager"
-            />
+            {canChangeRole ? (
+              <select
+                value={["user", "admin", "superadmin"].includes((appRole ?? "").trim().toLowerCase()) ? (appRole ?? "").trim().toLowerCase() : "user"}
+                onChange={(e) => setAppRole(e.target.value)}
+                className="w-full rounded-xl p-3 bg-navy-900/80 border border-navy-800 text-white focus:outline-none focus:ring-1 focus:ring-navy-400"
+              >
+                {roleOptions.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <div className="w-full rounded-xl p-3 bg-navy-900/50 border border-navy-800 text-white/70">
+                {user.app_role ?? "—"}
+              </div>
+            )}
+            {!canChangeRole && (
+              <p className="text-white/50 text-xs mt-1">Admins cannot change the role of other admins or the superadmin.</p>
+            )}
           </div>
           <div>
             <label className="block text-white/60 text-sm mb-1">New password (optional)</label>
@@ -135,7 +210,7 @@ function EditUserModal({
           <div className="flex gap-3 pt-2">
             <button
               type="button"
-              onClick={handleSave}
+              onClick={() => handleSave(false)}
               disabled={loading}
               className="flex-1 bg-navy-700 text-white p-3 rounded-xl font-semibold hover:bg-navy-600 transition disabled:opacity-60"
             >
@@ -157,19 +232,37 @@ function EditUserModal({
 
 export default function UsersPage() {
   const router = useRouter();
+  const pathname = usePathname();
   const [loading, setLoading] = useState(true);
   const [users, setUsers] = useState<AppUser[]>([]);
   const [authUserId, setAuthUserId] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editingUser, setEditingUser] = useState<AppUser | null>(null);
 
-  const loadUsers = async () => {
+  const loadUsers = useCallback(async () => {
     if (!authUserId || !isAdmin) return;
     const { data, error: err } = await getAllUsers(authUserId);
     if (err) setError(err.message);
     else setUsers(data ?? []);
-  };
+  }, [authUserId, isAdmin]);
+
+  // Sync profile updates from Settings (same or other tab)
+  useEffect(() => {
+    if (!authUserId || !isAdmin) return;
+    const ch = new BroadcastChannel("register-profile");
+    const handler = (e: MessageEvent) => {
+      if (e.data?.type === "profile-updated") loadUsers();
+    };
+    ch.addEventListener("message", handler);
+    return () => { ch.removeEventListener("message", handler); ch.close(); };
+  }, [authUserId, isAdmin, loadUsers]);
+
+  // Reload users when navigating back to this page
+  useEffect(() => {
+    if (pathname === "/users" && authUserId && isAdmin) loadUsers();
+  }, [pathname, authUserId, isAdmin, loadUsers]);
 
   useEffect(() => {
     (async () => {
@@ -182,12 +275,13 @@ export default function UsersPage() {
       const supabase = createClient();
       const { data: userRow } = await supabase
         .from("users")
-        .select("full_name")
+        .select("app_role")
         .eq("auth_id", session.user.id)
         .single();
-      const fullName = ((userRow as { full_name?: string } | null)?.full_name ?? "").toLowerCase().trim();
-      const admin = fullName === ADMIN_CAN_CREATE_WORKSPACE.toLowerCase();
+      const appRole = ((userRow as { app_role?: string | null } | null)?.app_role ?? "").toLowerCase().trim();
+      const admin = appRole === "admin" || appRole === "superadmin";
       setIsAdmin(admin);
+      setIsSuperAdmin(appRole === "superadmin");
       if (!admin) {
         setLoading(false);
         return;
@@ -225,7 +319,7 @@ export default function UsersPage() {
   if (!isAdmin) {
     return (
       <div className="min-h-screen bg-navy-950 flex flex-col items-center justify-center p-4">
-        <p className="text-red-300 mb-4">Access denied. Only the admin can manage users.</p>
+        <p className="text-red-300 mb-4">Access denied. Only admins can manage users.</p>
         <Link href="/dashboard" className="text-navy-300 hover:text-white">
           Back to Dashboard
         </Link>
@@ -264,6 +358,7 @@ export default function UsersPage() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-white/10">
+                <th className="text-left p-4 text-white/60 text-sm font-medium w-12"></th>
                 <th className="text-left p-4 text-white/60 text-sm font-medium">Name</th>
                 <th className="text-left p-4 text-white/60 text-sm font-medium">Email</th>
                 <th className="text-left p-4 text-white/60 text-sm font-medium">Role</th>
@@ -274,6 +369,15 @@ export default function UsersPage() {
             <tbody>
               {users.map((u) => (
                 <tr key={u.id} className="border-b border-white/5 hover:bg-white/5">
+                  <td className="p-4">
+                    <div className="w-8 h-8 rounded-full overflow-hidden bg-navy-800 flex items-center justify-center shrink-0">
+                      {u.profile_image ? (
+                        <img src={u.profile_image} alt="" className="w-full h-full object-cover" />
+                      ) : (
+                        <span className="text-white/40 text-xs font-medium">{(u.full_name ?? "?").charAt(0).toUpperCase()}</span>
+                      )}
+                    </div>
+                  </td>
                   <td className="p-4">{u.full_name ?? "—"}</td>
                   <td className="p-4">{u.email ?? "—"}</td>
                   <td className="p-4">{u.app_role ?? "—"}</td>
@@ -297,9 +401,11 @@ export default function UsersPage() {
         </div>
       </main>
 
-      {editingUser && (
+      {editingUser && authUserId && (
         <EditUserModal
           user={editingUser}
+          currentUserAuthId={authUserId}
+          currentUserIsSuperAdmin={isSuperAdmin}
           onClose={() => setEditingUser(null)}
           onSaved={() => loadUsers()}
         />

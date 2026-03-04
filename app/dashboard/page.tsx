@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { useForm, type SubmitHandler } from "react-hook-form";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { createClient, getCachedSession, getSessionWithRetry, clearSessionCache } from "@/lib/supabase";
@@ -35,15 +35,17 @@ const COVER_GRADIENTS = [
 
 const MEMBER_LIMIT = 10;
 
-/** Only this user can create workspaces. Hardcoded admin. */
-const ADMIN_CAN_CREATE_WORKSPACE = "mughis siddiqui";
+/** Admin access is determined by app_role from the users table. */
 
 function AddNewUserModal({
   onClose,
   onSuccess,
+  canAssignAdminRole,
 }: {
   onClose: () => void;
   onSuccess: () => void;
+  /** When true (superadmin), role dropdown includes Admin. When false (admin), new users are created as User only. */
+  canAssignAdminRole: boolean;
 }) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
@@ -56,7 +58,15 @@ function AddNewUserModal({
 
   const onSubmit: SubmitHandler<{ name: string; email: string; password: string; role: string }> = async (data) => {
     const nameTrimmed = (data.name ?? "").trim();
-    const role = (data.role ?? "developer").trim();
+    const role = canAssignAdminRole ? ((data.role ?? "user").trim().toLowerCase() || "user") : "user";
+    if (canAssignAdminRole && role !== "user" && role !== "admin") {
+      setMessage({ type: "error", text: "Invalid role." });
+      return;
+    }
+    if (!canAssignAdminRole && role !== "user") {
+      setMessage({ type: "error", text: "Only the superadmin can add users with the Admin role." });
+      return;
+    }
     setLoading(true);
     setMessage(null);
     const supabase = createClient();
@@ -124,12 +134,20 @@ function AddNewUserModal({
             {errors.email && <p className="text-red-300 text-sm mt-1">{errors.email.message}</p>}
           </div>
           <div className="mb-4">
-            <input
-              type="text"
-              placeholder="Role (e.g. developer, designer, project_manager)"
-              className={`w-full rounded-xl p-3 bg-navy-900/80 border text-white placeholder:text-navy-400 focus:outline-none focus:ring-1 focus:ring-navy-400 transition ${errors.role ? "border-red-400/50" : "border-navy-800"}`}
-              {...register("role", { required: "Role is required" })}
-            />
+            {canAssignAdminRole ? (
+              <select
+                className={`w-full rounded-xl p-3 bg-navy-900/80 border text-white focus:outline-none focus:ring-1 focus:ring-navy-400 transition ${errors.role ? "border-red-400/50" : "border-navy-800"}`}
+                {...register("role", { required: "Role is required" })}
+              >
+                <option value="">Choose role</option>
+                <option value="user">User</option>
+                <option value="admin">Admin</option>
+              </select>
+            ) : (
+              <div className="w-full rounded-xl p-3 bg-navy-900/50 border border-navy-800 text-white/80 text-sm">
+                User (only superadmin can add Admins)
+              </div>
+            )}
             {errors.role && <p className="text-red-300 text-sm mt-1">{errors.role.message}</p>}
           </div>
           <div className="mb-6">
@@ -200,7 +218,7 @@ function Sidebar({
                 }`}
               >
                 {(ws.name || "?").charAt(0).toUpperCase()}
-              </div>
+    </div>
               <span className="flex-1 truncate text-sm font-medium">{ws.name}</span>
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -307,30 +325,43 @@ function Sidebar({
           </div>
         ))}
       </nav>
-      {isAdmin && (
-        <div className="p-3 border-t border-white/10 shrink-0 space-y-2">
+      <div className="p-3 border-t border-white/10 shrink-0 space-y-2">
+        {isAdmin ? (
+          <>
+            <Link
+              href="/users"
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white/80 hover:text-white transition-colors"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+              </svg>
+              <span className="text-sm font-medium">Manage users</span>
+            </Link>
+            <button
+              type="button"
+              onClick={onAddNewUserClick}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 border-2 border-dashed border-white/20 hover:border-white/40 text-white/80 hover:text-white transition-colors cursor-pointer shrink-0"
+            >
+              <span className="text-xl font-light">+</span>
+              <span className="text-sm font-medium">Add new user</span>
+            </button>
+          </>
+        ) : (
           <Link
-            href="/users"
+            href="/settings"
             className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white/80 hover:text-white transition-colors"
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-              <circle cx="9" cy="7" r="4" />
-              <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
-              <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
             </svg>
-            <span className="text-sm font-medium">Manage users</span>
+            <span className="text-sm font-medium">Settings</span>
           </Link>
-          <button
-            type="button"
-            onClick={onAddNewUserClick}
-            className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 border-2 border-dashed border-white/20 hover:border-white/40 text-white/80 hover:text-white transition-colors cursor-pointer shrink-0"
-          >
-            <span className="text-xl font-light">+</span>
-            <span className="text-sm font-medium">Add new user</span>
-          </button>
-        </div>
-      )}
+        )}
+      </div>
     </aside>
   );
 }
@@ -438,10 +469,12 @@ function BoardAccessModal({
           ) : (
             <div className="space-y-2">
               {members.map((m) => {
-                const isAdmin = (m.full_name ?? "").toLowerCase().trim() === "mughis siddiqui";
+                const role = (m.app_role ?? "").toLowerCase().trim();
+                const isAdmin = role === "admin" || role === "superadmin";
+                const roleLabel = role === "superadmin" ? "Superadmin" : role === "admin" ? "Admin" : "Member";
                 return (
                   <div key={m.id} className="flex items-center justify-between py-2 px-3 rounded-lg bg-white/5">
-                    <span className="text-white text-sm">{m.full_name ?? "Unknown"}{isAdmin && " (admin)"}</span>
+                    <span className="text-white text-sm">{m.full_name ?? "Unknown"}{isAdmin && ` (${roleLabel})`}</span>
                     {!isAdmin && (
                       <button type="button" onClick={() => handleRemove(m.user_id)} className="px-3 py-1 rounded-lg text-red-300 text-xs hover:bg-red-500/20">
                         Remove
@@ -461,10 +494,12 @@ function BoardAccessModal({
 function CollaboratorsModal({
   workspace,
   authUserId,
+  isCurrentUserAdmin,
   onClose,
 }: {
   workspace: Workspace;
   authUserId: string | null;
+  isCurrentUserAdmin: boolean;
   onClose: () => void;
 }) {
   const [members, setMembers] = useState<WorkspaceMember[]>([]);
@@ -506,10 +541,6 @@ function CollaboratorsModal({
     (u) => !memberIds.has(u.auth_id) && u.auth_id !== authUserId,
   );
   const countDisplay = `${members.length}/${MEMBER_LIMIT}`;
-  const ADMIN_NAME = "mughis siddiqui";
-  const adminUserId =
-    members.find((m) => (m.full_name ?? "").toLowerCase().trim() === ADMIN_NAME.toLowerCase())?.user_id ?? null;
-  const isCurrentUserAdmin = authUserId != null && adminUserId === authUserId;
 
   const handleLeave = async () => {
     if (!authUserId) return;
@@ -561,9 +592,9 @@ function CollaboratorsModal({
             <span className="px-2 py-0.5 rounded-full bg-navy-900 text-white/80 text-sm">
               {countDisplay}
             </span>
-          </div>
-          <button
-            type="button"
+      </div>
+              <button
+                type="button"
             onClick={onClose}
             className="p-2 rounded-lg text-white/70 hover:bg-white/10 hover:text-white"
           >
@@ -579,7 +610,7 @@ function CollaboratorsModal({
               <path d="M18 6 6 18" />
               <path d="m6 6 12 12" />
             </svg>
-          </button>
+              </button>
         </div>
 
         <div className="p-4 border-b border-white/10 space-y-3">
@@ -615,18 +646,18 @@ function CollaboratorsModal({
                             <p className="text-white/50 text-xs truncate">{u.email}</p>
                           )}
                         </div>
-                        <button
-                          type="button"
+              <button
+                type="button"
                           onClick={() => handleAddMember(u.auth_id)}
                           disabled={members.length >= MEMBER_LIMIT || addingUserId === u.auth_id}
                           className="px-3 py-1.5 rounded-lg bg-navy-700 text-white text-xs font-medium hover:bg-navy-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
+              >
                           {addingUserId === u.auth_id ? "Adding…" : "Add"}
-                        </button>
-                      </div>
+              </button>
+            </div>
                     ))
                   )}
-                </div>
+          </div>
               )}
               {addError && (
                 <p className="text-red-400 text-xs mt-2">
@@ -669,7 +700,9 @@ function CollaboratorsModal({
                     .toUpperCase()
                     .slice(0, 2) || "?";
                 const username = name.toLowerCase().replace(/\s+/g, "") || "user";
-                const isAdmin = m.user_id === adminUserId;
+                const role = (m.app_role ?? "").toLowerCase().trim();
+                const isAdmin = role === "admin" || role === "superadmin";
+                const roleLabel = role === "superadmin" ? "Superadmin" : role === "admin" ? "Admin" : "Member";
                 const isCurrentUser = m.user_id === authUserId;
                 return (
                   <div
@@ -685,7 +718,7 @@ function CollaboratorsModal({
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       <span className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-navy-900 text-white/90 text-xs">
-                        {isAdmin ? "Admin" : "Member"}
+                        {roleLabel}
                         {isAdmin && (
                           <svg
                             xmlns="http://www.w3.org/2000/svg"
@@ -701,8 +734,8 @@ function CollaboratorsModal({
                         )}
                       </span>
                       {isCurrentUser ? (
-                        <button
-                          type="button"
+          <button
+            type="button"
                           onClick={handleLeave}
                           className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-navy-900 text-white/90 text-xs hover:bg-red-500/20 hover:text-red-300"
                         >
@@ -720,8 +753,8 @@ function CollaboratorsModal({
                             <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
                           </svg>
                           Leave
-                        </button>
-                      ) : isCurrentUserAdmin ? (
+          </button>
+                      ) : isCurrentUserAdmin && !isAdmin ? (
                         <button
                           type="button"
                           onClick={() => handleKick(m.user_id)}
@@ -757,7 +790,8 @@ function CollaboratorsModal({
 
 export default function Dashboard() {
   const router = useRouter();
-  const [user, setUser] = useState<{ email?: string; full_name?: string } | null>(null);
+  const pathname = usePathname();
+  const [user, setUser] = useState<{ email?: string; full_name?: string; profile_image?: string | null; app_role?: string | null } | null>(null);
   const [authUserId, setAuthUserId] = useState<string | null>(null);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [boards, setBoards] = useState<BoardWithWorkspace[]>([]);
@@ -775,6 +809,7 @@ export default function Dashboard() {
   );
   const [selectedBoardForAccess, setSelectedBoardForAccess] = useState<BoardWithWorkspace | null>(null);
   const [selectedWorkspaceForBoards, setSelectedWorkspaceForBoards] = useState<Workspace | null>(null);
+  const [showProfileExpanded, setShowProfileExpanded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
 
@@ -788,7 +823,7 @@ export default function Dashboard() {
   const optimisticallyDeletedBoardIdsRef = useRef<Set<string>>(new Set());
   const optimisticallyDeletedWorkspaceIdsRef = useRef<Set<string>>(new Set());
   const creatingWorkspaceRef = useRef(false);
-  const isAdmin = (user?.full_name ?? "").toLowerCase().trim() === ADMIN_CAN_CREATE_WORKSPACE.toLowerCase();
+  const isAdmin = ((user?.app_role ?? "").toLowerCase().trim() === "admin") || ((user?.app_role ?? "").toLowerCase().trim() === "superadmin");
 
   const refreshDashboard = async () => {
     if (!authUserId) return;
@@ -835,13 +870,16 @@ export default function Dashboard() {
       const supabase = createClient();
       const { data: userRow } = await supabase
         .from("users")
-        .select("full_name")
+        .select("full_name, profile_image, app_role")
         .eq("auth_id", u.id)
         .single();
+      const row = userRow as { full_name?: string; profile_image?: string | null; app_role?: string | null } | null;
       setUser({
         email: u.email ?? undefined,
         full_name:
-          (userRow?.full_name as string) ?? (u.user_metadata?.full_name as string) ?? undefined,
+          (row?.full_name as string) ?? (u.user_metadata?.full_name as string) ?? undefined,
+        profile_image: row?.profile_image ?? null,
+        app_role: row?.app_role ?? null,
       });
       setAuthUserId(u.id);
 
@@ -863,6 +901,34 @@ export default function Dashboard() {
     })();
   }, [router]);
 
+  const refetchUser = async () => {
+    if (!authUserId) return;
+    const supabase = createClient();
+    const { data: userRow } = await supabase
+      .from("users")
+      .select("full_name, profile_image, app_role")
+      .eq("auth_id", authUserId)
+      .single();
+    const row = userRow as { full_name?: string; profile_image?: string | null; app_role?: string | null } | null;
+    setUser((prev) =>
+      prev
+        ? {
+            ...prev,
+            full_name: (row?.full_name as string) ?? prev.full_name,
+            profile_image: row?.profile_image ?? null,
+            app_role: row?.app_role ?? null,
+          }
+        : prev
+    );
+  };
+
+  useEffect(() => {
+    if (!authUserId) return;
+    const onVisible = () => refetchUser();
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [authUserId]);
+
   // BroadcastChannel: sync across tabs when boards/workspaces change
   useEffect(() => {
     if (!authUserId) return;
@@ -878,6 +944,22 @@ export default function Dashboard() {
       broadcastChannelRef.current?.close();
     };
   }, [authUserId]);
+
+  // BroadcastChannel: sync profile updates from Settings (same or other tab)
+  useEffect(() => {
+    if (!authUserId) return;
+    const ch = new BroadcastChannel("register-profile");
+    const handler = (e: MessageEvent) => {
+      if (e.data?.type === "profile-updated") refetchUser();
+    };
+    ch.addEventListener("message", handler);
+    return () => { ch.removeEventListener("message", handler); ch.close(); };
+  }, [authUserId]);
+
+  // Refetch user when navigating back to dashboard (e.g. from Settings)
+  useEffect(() => {
+    if (pathname === "/dashboard" && authUserId) refetchUser();
+  }, [pathname, authUserId]);
 
   // Supabase Realtime: sync when boards/workspace change in DB (other devices)
   useEffect(() => {
@@ -925,9 +1007,9 @@ export default function Dashboard() {
     const name = addWorkspaceName.trim();
     if (!name || !authUserId) return;
     const canCreate =
-      (user?.full_name ?? "").toLowerCase().trim() === ADMIN_CAN_CREATE_WORKSPACE.toLowerCase();
+      ((user?.app_role ?? "").toLowerCase().trim() === "admin") || ((user?.app_role ?? "").toLowerCase().trim() === "superadmin");
     if (!canCreate) {
-      setError("Only the admin (Mughis Siddiqui) can create workspaces.");
+      setError("Only admins can create workspaces.");
       return;
     }
     if (creatingWorkspaceRef.current) return;
@@ -1043,7 +1125,7 @@ export default function Dashboard() {
     );
   }
 
-  return (
+    return (
     <div className="min-h-screen flex flex-col bg-gradient-to-br from-navy-950 via-navy-900/80 to-navy-950">
       <header className="flex items-center justify-between px-6 py-3 bg-white/5 backdrop-blur-md border-b border-white/10 shrink-0">
         <div className="flex items-center gap-4">
@@ -1062,21 +1144,57 @@ export default function Dashboard() {
           <span className="text-white font-semibold text-lg tracking-tight">Workspaces</span>
         </div>
         <div className="flex items-center gap-4">
-          <span
-            className="text-white/90 text-sm truncate max-w-[180px]"
-            title={user?.email}
-          >
-            {user?.full_name ?? user?.email}
-          </span>
           <button
             type="button"
-            onClick={handleSignOut}
-            className="px-4 py-2 rounded-xl bg-white/10 text-white text-sm font-medium hover:bg-white/20 border border-white/10 transition-colors"
+            onClick={() => setShowProfileExpanded(true)}
+            className="flex items-center gap-3 rounded-lg hover:bg-white/5 px-2 py-1.5 -mx-2 transition-colors cursor-pointer"
           >
-            Sign out
+            <div className="w-8 h-8 rounded-full overflow-hidden bg-navy-800 flex items-center justify-center shrink-0">
+              {user?.profile_image && String(user.profile_image).trim() ? (
+                <img src={user.profile_image} alt="" className="w-full h-full object-cover" />
+              ) : (
+                <span className="text-white/60 text-sm font-medium">{(user?.full_name ?? user?.email ?? "?").charAt(0).toUpperCase()}</span>
+              )}
+            </div>
+            <span
+              className="text-white/90 text-sm truncate max-w-[180px]"
+              title={user?.email}
+            >
+              {user?.full_name ?? user?.email}
+            </span>
           </button>
-        </div>
+        <button
+          type="button"
+          onClick={handleSignOut}
+            className="px-4 py-2 rounded-xl bg-white/10 text-white text-sm font-medium hover:bg-white/20 border border-white/10 transition-colors"
+        >
+          Sign out
+        </button>
+      </div>
       </header>
+
+      {showProfileExpanded && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 animate-profile-overlay-in"
+          onClick={() => setShowProfileExpanded(false)}
+        >
+          <div
+            className="relative group cursor-pointer animate-profile-image-in"
+            onClick={(e) => { e.stopPropagation(); router.push("/settings"); setShowProfileExpanded(false); }}
+          >
+            <div className="w-56 h-56 sm:w-72 sm:h-72 md:w-96 md:h-96 rounded-full overflow-hidden bg-navy-800 flex items-center justify-center border-4 border-white/20 shadow-2xl">
+              {user?.profile_image && String(user.profile_image).trim() ? (
+                <img src={user.profile_image} alt="" className="w-full h-full object-cover" />
+              ) : (
+                <span className="text-white/60 text-6xl sm:text-7xl md:text-8xl font-medium">{(user?.full_name ?? user?.email ?? "?").charAt(0).toUpperCase()}</span>
+              )}
+            </div>
+            <div className="absolute inset-0 rounded-full bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+              <span className="text-white font-medium text-base sm:text-lg">Update profile</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="flex flex-1 min-h-0">
         <Sidebar
@@ -1097,20 +1215,20 @@ export default function Dashboard() {
           {error && (
             <div className="mb-4 px-4 py-3 bg-red-500/10 border border-red-400/30 text-red-200 rounded-xl text-sm shrink-0">
               {error}
-            </div>
+          </div>
           )}
 
           {showBoards && selectedWorkspaceForBoards ? (
             <section className="flex-1">
               <div className="flex items-center gap-3 mb-4">
-                <button
-                  type="button"
+          <button
+            type="button"
                   onClick={() => { setShowBoards(false); setSelectedWorkspaceForBoards(null); }}
                   className="p-2 rounded-lg text-white/70 hover:bg-white/10 hover:text-white"
                   aria-label="Back to workspaces"
-                >
+          >
                   <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m15 18-6-6 6-6"/></svg>
-                </button>
+          </button>
                 <h2 className="text-white/90 text-sm font-medium uppercase tracking-wider flex items-center gap-2">
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
@@ -1128,7 +1246,7 @@ export default function Dashboard() {
                   </svg>
                   Boards in {selectedWorkspaceForBoards.name}
                 </h2>
-              </div>
+        </div>
               <div className="flex flex-wrap gap-4">
                 {boards
                   .filter((b) => b.workspace_id === selectedWorkspaceForBoards.id)
@@ -1178,31 +1296,31 @@ export default function Dashboard() {
 
                 {addBoardWorkspaceId === selectedWorkspaceForBoards.id ? (
                   <div className="w-[200px] rounded-xl bg-white/5 border border-white/10 p-4 shrink-0">
-                    <input
-                      type="text"
+                <input
+                  type="text"
                       value={addBoardName}
                       onChange={(e) => setAddBoardName(e.target.value)}
                       placeholder="Board name"
                       className="w-full px-3 py-2 rounded-lg bg-navy-900/80 border border-navy-800 text-white text-sm placeholder:text-navy-400 focus:outline-none mb-3"
                       autoFocus
-                      onKeyDown={(e) => {
+                  onKeyDown={(e) => {
                         if (e.key === "Enter") handleCreateBoard();
                         if (e.key === "Escape") {
                           setAddBoardWorkspaceId(null);
                           setAddBoardName("");
                         }
                       }}
-                    />
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
+                />
+                <div className="flex gap-2">
+                  <button
+                    type="button"
                         onClick={handleCreateBoard}
                         className="px-3 py-2 bg-navy-700 text-white text-xs font-medium rounded-lg"
-                      >
+                  >
                         Create
-                      </button>
-                      <button
-                        type="button"
+                  </button>
+                  <button
+                    type="button"
                         onClick={() => {
                           setAddBoardWorkspaceId(null);
                           setAddBoardName("");
@@ -1210,20 +1328,20 @@ export default function Dashboard() {
                         className="px-3 py-2 text-navy-400 text-xs"
                       >
                         Cancel
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
                     onClick={() => setAddBoardWorkspaceId(selectedWorkspaceForBoards.id)}
                     className="w-[200px] rounded-xl bg-white/5 hover:bg-white/10 border-2 border-dashed border-white/20 hover:border-white/40 min-h-[120px] flex flex-col items-center justify-center text-white/60 hover:text-white/80 shrink-0 transition-all"
-                  >
+              >
                     <span className="text-2xl font-light mb-1">+</span>
                     <span className="text-sm font-medium">Create new board</span>
-                  </button>
-                )}
-              </div>
+              </button>
+            )}
+          </div>
             </section>
           ) : (
             <section className="flex-1">
@@ -1252,13 +1370,13 @@ export default function Dashboard() {
                           }`}
                         >
                           {(ws.name || "?").charAt(0).toUpperCase()}
-                        </div>
+          </div>
                         <span className="text-white font-medium text-base flex-1">
                           {ws.name}
                         </span>
                         <div className="flex items-center gap-2">
-                          <button
-                            type="button"
+          <button
+            type="button"
                             onClick={() => {
                               setSelectedWorkspaceForMembers(ws);
                               setShowMembersModal(true);
@@ -1280,7 +1398,7 @@ export default function Dashboard() {
                               <path d="M16 3.13a4 4 0 0 1 0 7.75" />
                             </svg>
                             Members
-                          </button>
+          </button>
                           <Link
                             href={`/workspace/${ws.id}`}
                             className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-white/90 text-sm"
@@ -1323,7 +1441,7 @@ export default function Dashboard() {
                             </svg>
                           </button>
                           )}
-                        </div>
+        </div>
                       </div>
                       <div className="flex gap-4 overflow-x-auto pb-2">
                         {wsBoards.map((board, i) => (
@@ -1331,8 +1449,8 @@ export default function Dashboard() {
                             <Link
                               href={`/workspace/${board.workspace_id}?board=${board.id}`}
                               className="block w-full rounded-xl overflow-hidden bg-white/5 hover:bg-white/10 border border-white/10 transition-all text-left"
-                            >
-                              <div
+        >
+          <div
                                 className={`aspect-[16/10] bg-gradient-to-br ${
                                   COVER_GRADIENTS[
                                     (wsIdx * 3 + i) % COVER_GRADIENTS.length
@@ -1393,21 +1511,21 @@ export default function Dashboard() {
                               >
                                 Create
                               </button>
-                              <button
-                                type="button"
-                                onClick={() => {
+                  <button
+                    type="button"
+                    onClick={() => {
                                   setAddBoardWorkspaceId(null);
                                   setAddBoardName("");
                                 }}
                                 className="px-2 py-1.5 text-navy-400 text-xs"
                               >
                                 Cancel
-                              </button>
+                  </button>
                             </div>
                           </div>
                         ) : (
-                          <button
-                            type="button"
+            <button
+              type="button"
                             onClick={() => setAddBoardWorkspaceId(ws.id)}
                             className="w-[160px] shrink-0 rounded-xl bg-white/5 hover:bg-white/10 border-2 border-dashed border-white/20 hover:border-white/40 min-h-[90px] flex flex-col items-center justify-center text-white/60 hover:text-white/80 transition-all"
                           >
@@ -1422,7 +1540,7 @@ export default function Dashboard() {
                   );
                 })}
 
-                {(user?.full_name ?? "").toLowerCase().trim() === ADMIN_CAN_CREATE_WORKSPACE.toLowerCase() && (
+                {((user?.app_role ?? "").toLowerCase().trim() === "admin" || (user?.app_role ?? "").toLowerCase().trim() === "superadmin") && (
                   showCreateWorkspace ? (
                     <div className="rounded-xl bg-white/5 border border-white/10 p-5 max-w-md">
                       <input
@@ -1455,11 +1573,11 @@ export default function Dashboard() {
                             setAddWorkspaceName("");
                           }}
                           className="px-3 py-2 text-navy-400 hover:text-white text-sm"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
                   ) : (
                     <button
                       type="button"
@@ -1481,6 +1599,7 @@ export default function Dashboard() {
         <CollaboratorsModal
           workspace={selectedWorkspaceForMembers}
           authUserId={authUserId}
+          isCurrentUserAdmin={isAdmin}
           onClose={() => {
             setShowMembersModal(false);
             setSelectedWorkspaceForMembers(null);
@@ -1490,6 +1609,7 @@ export default function Dashboard() {
 
       {showAddNewUserModal && (
         <AddNewUserModal
+          canAssignAdminRole={((user?.app_role ?? "").toLowerCase().trim() === "superadmin")}
           onClose={() => setShowAddNewUserModal(false)}
           onSuccess={() => setShowAddNewUserModal(false)}
         />

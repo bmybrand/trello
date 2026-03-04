@@ -5,8 +5,6 @@ import { useForm, SubmitHandler } from "react-hook-form";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase";
 
-const ADMIN_NAME = "mughis siddiqui";
-
 type FormValues = {
   name: string;
   email: string;
@@ -21,8 +19,8 @@ export default function Register({ isAdmin = false }: { isAdmin?: boolean }) {
 
   const onSubmit: SubmitHandler<FormValues> = async (data) => {
     const nameTrimmed = (data.name ?? "").trim();
-    if (!isAdmin && nameTrimmed.toLowerCase() !== ADMIN_NAME.toLowerCase()) {
-      setMessage({ type: "error", text: "Registration is restricted to the admin only." });
+    if (!isAdmin) {
+      setMessage({ type: "error", text: "Registration is restricted to admins only." });
       return;
     }
     setLoading(true);
@@ -48,6 +46,7 @@ export default function Register({ isAdmin = false }: { isAdmin?: boolean }) {
         auth_id: authData.user.id,
         email: authData.user.email ?? data.email,
         full_name: nameTrimmed,
+        app_role: "user",
       });
       if (usersError) {
         setLoading(false);
