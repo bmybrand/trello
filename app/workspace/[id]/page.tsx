@@ -15,7 +15,7 @@ import {
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
-import { createClient, getCachedSession, getSessionWithRetry, clearSessionCache } from "@/lib/supabase";
+import { createClient, getCachedSession, getSessionWithRetry, clearSessionCache, uploadCoverImage } from "@/lib/supabase";
 import {
   getBoardCards,
   getBoardListOrder,
@@ -429,7 +429,7 @@ export default function WorkspacePage() {
               boardCardId: c.boardCardId,
               itemId: c.item?.id,
               done: c.item?.status,
-              coverUrl: c.item?.cover_path ? `/uploads/covers/${c.item.cover_path}` : null,
+              coverUrl: c.item?.cover_path ? (c.item.cover_path.startsWith("http") ? c.item.cover_path : `/uploads/covers/${c.item.cover_path}`) : null,
               description: c.item?.description ?? null,
             });
           }
@@ -466,7 +466,7 @@ export default function WorkspacePage() {
           boardCardId: c.boardCardId,
           itemId: c.item?.id,
           done: c.item?.status,
-          coverUrl: c.item?.cover_path ? `/uploads/covers/${c.item.cover_path}` : null,
+          coverUrl: c.item?.cover_path ? (c.item.cover_path.startsWith("http") ? c.item.cover_path : `/uploads/covers/${c.item.cover_path}`) : null,
           description: c.item?.description ?? null,
         });
       });
@@ -500,7 +500,7 @@ export default function WorkspacePage() {
               boardCardId: c.boardCardId,
               itemId: c.item?.id,
               done: c.item?.status,
-              coverUrl: c.item?.cover_path ? `/uploads/covers/${c.item.cover_path}` : null,
+              coverUrl: c.item?.cover_path ? (c.item.cover_path.startsWith("http") ? c.item.cover_path : `/uploads/covers/${c.item.cover_path}`) : null,
               description: c.item?.description ?? null,
             });
           });
@@ -576,7 +576,7 @@ export default function WorkspacePage() {
                 boardCardId: c.boardCardId,
                 itemId: c.item?.id,
                 done: c.item?.status,
-                coverUrl: c.item?.cover_path ? `/uploads/covers/${c.item.cover_path}` : null,
+                coverUrl: c.item?.cover_path ? (c.item.cover_path.startsWith("http") ? c.item.cover_path : `/uploads/covers/${c.item.cover_path}`) : null,
                 description: c.item?.description ?? null,
               });
             }
@@ -877,21 +877,18 @@ export default function WorkspacePage() {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
+    const ext = file.name.split(".").pop()?.toLowerCase() || "";
+    if (!["jpg", "jpeg", "png", "gif", "webp"].includes(ext)) {
+      setAddCardError("Allowed types: jpg, png, gif, webp");
+      return;
+    }
     setPopupLoading(true);
     setAddCardError(null);
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const res = await fetch("/api/upload-cover", {
-        method: "POST",
-        body: formData,
-      });
-      const data = await res.json();
-      if (!res.ok || !data?.path) {
-        throw new Error(data?.error || "Failed to upload image");
+      const { url: publicPath, error } = await uploadCoverImage(file);
+      if (error || !publicPath) {
+        throw new Error(error?.message ?? "Failed to upload image");
       }
-      const publicPath: string = data.path;
-      const filename = publicPath.split("/").pop() ?? "";
       setEditCoverUrl(publicPath);
       setEditCoverRemoved(false);
       setLists((prev) =>
@@ -905,7 +902,7 @@ export default function WorkspacePage() {
       setEditCard((prev) =>
         prev ? { ...prev, coverUrl: publicPath } : prev
       );
-      updateItem(editCard.itemId, { cover_path: filename }).then(({ error }) => {
+      updateItem(editCard.itemId, { cover_path: publicPath }).then(({ error }) => {
         if (error) {
           setAddCardError(error.message);
         } else {

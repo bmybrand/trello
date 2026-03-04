@@ -1,9 +1,7 @@
 import { NextResponse } from "next/server";
-import { writeFile, mkdir } from "fs/promises";
-import path from "path";
+import { createServiceClient } from "@/lib/supabase";
 
-const UPLOAD_DIR = "public/uploads/covers";
-const PUBLIC_PATH = "/uploads/covers";
+const COVERS_BUCKET = "covers";
 
 export async function POST(request: Request) {
   try {
@@ -23,14 +21,18 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
-    const filename = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-    const dir = path.join(process.cwd(), UPLOAD_DIR);
-    await mkdir(dir, { recursive: true });
-    const filepath = path.join(dir, filename);
-    const bytes = await file.arrayBuffer();
-    await writeFile(filepath, Buffer.from(bytes));
-    const publicPath = `${PUBLIC_PATH}/${filename}`;
-    return NextResponse.json({ path: publicPath });
+    const storagePath = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+    const supabase = createServiceClient();
+    const { data, error } = await supabase.storage
+      .from(COVERS_BUCKET)
+      .upload(storagePath, file, { upsert: false });
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+    const {
+      data: { publicUrl },
+    } = supabase.storage.from(COVERS_BUCKET).getPublicUrl(data.path);
+    return NextResponse.json({ path: publicUrl });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Upload failed";
     return NextResponse.json({ error: message }, { status: 500 });

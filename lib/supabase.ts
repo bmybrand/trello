@@ -42,6 +42,14 @@ export function createClient() {
   return client;
 }
 
+/** Server-side only. Uses service role key to bypass RLS. For API routes (e.g. file upload). */
+export function createServiceClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+  return createSupabaseClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+}
+
 function isRateLimitError(err: unknown): boolean {
   if (!err || typeof err !== "object") return false;
   const msg = "message" in err ? String((err as { message?: string }).message) : "";
