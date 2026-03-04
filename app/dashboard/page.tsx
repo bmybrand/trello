@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
+import { useForm, type SubmitHandler } from "react-hook-form";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
@@ -37,6 +38,122 @@ const MEMBER_LIMIT = 10;
 /** Only this user can create workspaces. Hardcoded admin. */
 const ADMIN_CAN_CREATE_WORKSPACE = "mughis siddiqui";
 
+function AddNewUserModal({
+  onClose,
+  onSuccess,
+}: {
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const { register, handleSubmit, reset, formState: { errors } } = useForm<{
+    name: string;
+    email: string;
+    password: string;
+    role: string;
+  }>();
+
+  const onSubmit: SubmitHandler<{ name: string; email: string; password: string; role: string }> = async (data) => {
+    const nameTrimmed = (data.name ?? "").trim();
+    const role = (data.role ?? "developer").trim();
+    setLoading(true);
+    setMessage(null);
+    const supabase = createClient();
+    const { data: authData, error } = await supabase.auth.signUp({
+      email: data.email,
+      password: data.password,
+      options: { data: { full_name: nameTrimmed, app_role: role } },
+    });
+    if (error) {
+      setLoading(false);
+      setMessage({ type: "error", text: error.message });
+      return;
+    }
+    if (authData.user) {
+      const { error: usersError } = await supabase.from("users").insert({
+        auth_id: authData.user.id,
+        email: authData.user.email ?? data.email,
+        full_name: nameTrimmed,
+        app_role: role,
+      });
+      if (usersError) {
+        setLoading(false);
+        setMessage({ type: "error", text: `Account created but profile save failed: ${usersError.message}` });
+        return;
+      }
+    }
+    setLoading(false);
+    reset();
+    setMessage({ type: "success", text: "User registered! They can now sign in." });
+    setTimeout(() => onSuccess(), 1500);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60" onClick={onClose}>
+      <div className="bg-navy-950 rounded-2xl shadow-2xl w-full max-w-md border border-white/10 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-4 border-b border-white/10">
+          <h2 className="text-white font-semibold text-lg">Add new user</h2>
+          <button type="button" onClick={onClose} className="p-2 rounded-lg text-white/70 hover:bg-white/10 hover:text-white">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+          </button>
+        </div>
+        <form onSubmit={handleSubmit(onSubmit)} className="p-6">
+          <p className="text-white/60 text-sm mb-4">Add a team member to sign up and use the app.</p>
+          {message && (
+            <p className={`mb-4 p-3 rounded-xl text-sm ${message.type === "error" ? "bg-red-500/10 text-red-200 border border-red-400/30" : "bg-emerald-500/10 text-emerald-200 border border-emerald-400/30"}`}>
+              {message.text}
+            </p>
+          )}
+          <div className="mb-4">
+            <input
+              type="text"
+              placeholder="Full Name"
+              className={`w-full rounded-xl p-3 bg-navy-900/80 border text-white placeholder:text-navy-400 focus:outline-none focus:ring-1 focus:ring-navy-400 transition ${errors.name ? "border-red-400/50" : "border-navy-800"}`}
+              {...register("name", { required: "Name is required" })}
+            />
+            {errors.name && <p className="text-red-300 text-sm mt-1">{errors.name.message}</p>}
+          </div>
+          <div className="mb-4">
+            <input
+              type="email"
+              placeholder="Email"
+              className={`w-full rounded-xl p-3 bg-navy-900/80 border text-white placeholder:text-navy-400 focus:outline-none focus:ring-1 focus:ring-navy-400 transition ${errors.email ? "border-red-400/50" : "border-navy-800"}`}
+              {...register("email", { required: "Email is required" })}
+            />
+            {errors.email && <p className="text-red-300 text-sm mt-1">{errors.email.message}</p>}
+          </div>
+          <div className="mb-4">
+            <input
+              type="text"
+              placeholder="Role (e.g. developer, designer, project_manager)"
+              className={`w-full rounded-xl p-3 bg-navy-900/80 border text-white placeholder:text-navy-400 focus:outline-none focus:ring-1 focus:ring-navy-400 transition ${errors.role ? "border-red-400/50" : "border-navy-800"}`}
+              {...register("role", { required: "Role is required" })}
+            />
+            {errors.role && <p className="text-red-300 text-sm mt-1">{errors.role.message}</p>}
+          </div>
+          <div className="mb-6">
+            <input
+              type="password"
+              placeholder="Password"
+              className={`w-full rounded-xl p-3 bg-navy-900/80 border text-white placeholder:text-navy-400 focus:outline-none focus:ring-1 focus:ring-navy-400 transition ${errors.password ? "border-red-400/50" : "border-navy-800"}`}
+              {...register("password", { required: "Password is required", minLength: { value: 6, message: "Password must be at least 6 characters" } })}
+            />
+            {errors.password && <p className="text-red-300 text-sm mt-1">{errors.password.message}</p>}
+          </div>
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full bg-navy-700 text-white p-3 rounded-xl font-semibold hover:bg-navy-600 transition disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {loading ? "Creating account…" : "Add user"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 function normalizeNetworkError(msg: string): string {
   if (!msg) return msg;
   const m = msg.toLowerCase();
@@ -51,12 +168,14 @@ function Sidebar({
   onBoardsClick,
   onMembersClick,
   onDeleteWorkspace,
+  onAddNewUserClick,
   isAdmin,
 }: {
   workspaces: Workspace[];
   onBoardsClick?: (ws: Workspace) => void;
   onMembersClick?: (ws: Workspace) => void;
   onDeleteWorkspace?: (ws: Workspace) => void;
+  onAddNewUserClick?: () => void;
   isAdmin?: boolean;
 }) {
   const [expandedId, setExpandedId] = useState<string | null>(workspaces[0]?.id ?? null);
@@ -189,14 +308,27 @@ function Sidebar({
         ))}
       </nav>
       {isAdmin && (
-        <div className="p-3 border-t border-white/10 shrink-0">
+        <div className="p-3 border-t border-white/10 shrink-0 space-y-2">
           <Link
-            href="/register"
+            href="/users"
+            className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white/80 hover:text-white transition-colors"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+              <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+              <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+            </svg>
+            <span className="text-sm font-medium">Manage users</span>
+          </Link>
+          <button
+            type="button"
+            onClick={onAddNewUserClick}
             className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 border-2 border-dashed border-white/20 hover:border-white/40 text-white/80 hover:text-white transition-colors cursor-pointer shrink-0"
           >
             <span className="text-xl font-light">+</span>
-            <span className="text-sm font-medium">Register</span>
-          </Link>
+            <span className="text-sm font-medium">Add new user</span>
+          </button>
         </div>
       )}
     </aside>
@@ -637,6 +769,7 @@ export default function Dashboard() {
   const [showCreateWorkspace, setShowCreateWorkspace] = useState(false);
   const [showMembersModal, setShowMembersModal] = useState(false);
   const [showBoardAccessModal, setShowBoardAccessModal] = useState(false);
+  const [showAddNewUserModal, setShowAddNewUserModal] = useState(false);
   const [selectedWorkspaceForMembers, setSelectedWorkspaceForMembers] = useState<Workspace | null>(
     null,
   );
@@ -958,6 +1091,7 @@ export default function Dashboard() {
             setShowMembersModal(true);
           }}
           onDeleteWorkspace={handleDeleteWorkspace}
+          onAddNewUserClick={() => setShowAddNewUserModal(true)}
         />
         <main className="flex-1 overflow-auto p-6 flex flex-col min-h-0">
           {error && (
@@ -1351,6 +1485,13 @@ export default function Dashboard() {
             setShowMembersModal(false);
             setSelectedWorkspaceForMembers(null);
           }}
+        />
+      )}
+
+      {showAddNewUserModal && (
+        <AddNewUserModal
+          onClose={() => setShowAddNewUserModal(false)}
+          onSuccess={() => setShowAddNewUserModal(false)}
         />
       )}
 

@@ -480,3 +480,48 @@ export async function deleteBoard(boardId: string, requesterAuthId: string): Pro
   const { error } = await supabase.from("boards").delete().eq("id", bid);
   return { error };
 }
+
+export type AppUser = {
+  id: number;
+  auth_id: string;
+  full_name: string | null;
+  email: string | null;
+  app_role: string | null;
+  created_at: string;
+};
+
+/** Get all users. Only admin can call. */
+export async function getAllUsers(requesterAuthId: string): Promise<{
+  data: AppUser[] | null;
+  error: Error | null;
+}> {
+  const supabase = createClient();
+  if (!(await isAdmin(supabase, requesterAuthId))) {
+    return { data: null, error: new Error("Only the admin can manage users.") };
+  }
+  const { data, error } = await supabase
+    .from("users")
+    .select("id, auth_id, full_name, email, app_role, created_at")
+    .order("created_at", { ascending: false });
+  if (error) return { data: null, error };
+  return { data: (data ?? []) as AppUser[], error: null };
+}
+
+/** Update a user's full_name, email, or app_role. Only admin can call. */
+export async function updateUser(
+  authId: string,
+  updates: { full_name?: string; email?: string; app_role?: string },
+  requesterAuthId: string
+): Promise<{ error: Error | null }> {
+  const supabase = createClient();
+  if (!(await isAdmin(supabase, requesterAuthId))) {
+    return { error: new Error("Only the admin can manage users.") };
+  }
+  const payload: Record<string, unknown> = {};
+  if (updates.full_name !== undefined) payload.full_name = updates.full_name.trim();
+  if (updates.email !== undefined) payload.email = updates.email.trim();
+  if (updates.app_role !== undefined) payload.app_role = updates.app_role.trim();
+  if (Object.keys(payload).length === 0) return { error: null };
+  const { error } = await supabase.from("users").update(payload).eq("auth_id", authId);
+  return { error };
+}
