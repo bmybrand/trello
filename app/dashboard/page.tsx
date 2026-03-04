@@ -7,7 +7,7 @@ import Image from "next/image";
 import { createClient, getCachedSession, getSessionWithRetry, clearSessionCache } from "@/lib/supabase";
 import {
   getWorkspacesForUser,
-  getBoardsByWorkspace,
+  getBoardsAccessibleToUser,
   createBoard,
   deleteBoard,
   createWorkspace,
@@ -16,8 +16,11 @@ import {
   searchUsers,
   addWorkspaceMember,
   removeWorkspaceMember,
+  getBoardMembers,
+  addBoardMember,
+  removeBoardMember,
 } from "@/lib/workspace-storage";
-import type { Workspace, Board, WorkspaceMember, SearchUser } from "@/lib/workspace-storage";
+import type { Workspace, Board, WorkspaceMember, SearchUser, BoardMember } from "@/lib/workspace-storage";
 
 type BoardWithWorkspace = Board & { workspaceName: string };
 
@@ -30,6 +33,9 @@ const COVER_GRADIENTS = [
 ];
 
 const MEMBER_LIMIT = 10;
+
+/** Only this user can create workspaces. Hardcoded admin. */
+const ADMIN_CAN_CREATE_WORKSPACE = "mughis siddiqui";
 
 function normalizeNetworkError(msg: string): string {
   if (!msg) return msg;
@@ -45,11 +51,13 @@ function Sidebar({
   onBoardsClick,
   onMembersClick,
   onDeleteWorkspace,
+  isAdmin,
 }: {
   workspaces: Workspace[];
   onBoardsClick?: (ws: Workspace) => void;
   onMembersClick?: (ws: Workspace) => void;
   onDeleteWorkspace?: (ws: Workspace) => void;
+  isAdmin?: boolean;
 }) {
   const [expandedId, setExpandedId] = useState<string | null>(workspaces[0]?.id ?? null);
   const colors = ["bg-orange-500", "bg-navy-700", "bg-emerald-500", "bg-amber-500", "bg-rose-500"];
@@ -59,7 +67,7 @@ function Sidebar({
       <div className="p-4 border-b border-white/10">
         <h2 className="text-navy-300 text-xs font-semibold uppercase tracking-wider">Workspaces</h2>
       </div>
-      <nav className="flex-1 overflow-y-auto py-2">
+      <nav className="flex-1 min-h-0 overflow-y-auto py-2">
         {workspaces.map((ws, i) => (
           <div key={ws.id} className="px-2">
             <button
@@ -151,6 +159,7 @@ function Sidebar({
                   </svg>
                   Settings
                 </Link>
+                {isAdmin && (
                 <button
                   type="button"
                   onClick={() => onDeleteWorkspace?.(ws)}
@@ -173,38 +182,147 @@ function Sidebar({
                   </svg>
                   Delete workspace
                 </button>
+                )}
               </div>
             )}
           </div>
         ))}
       </nav>
-      <div className="p-3 border-t border-white/10">
-        <div className="rounded-lg bg-navy-900/80 border border-white/10 p-4 relative overflow-hidden">
-          <div className="absolute bottom-0 right-0 w-12 h-12 flex items-center justify-center text-navy-400/40">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="24"
-              height="24"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z" />
-              <path d="M3 6h18" />
-              <path d="M16 10a4 4 0 0 1-8 0" />
-            </svg>
-          </div>
-          <h3 className="text-white font-semibold text-sm mb-1">Try Premium</h3>
-          <p className="text-white/70 text-xs leading-relaxed mb-3">
-            Full access, card mirroring, collapsible lists, unlimited boards, AI, and more!
-          </p>
-          <button type="button" className="text-navy-400 text-xs font-medium hover:underline">
-            Start free trial
+      {isAdmin && (
+        <div className="p-3 border-t border-white/10 shrink-0">
+          <Link
+            href="/register"
+            className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 border-2 border-dashed border-white/20 hover:border-white/40 text-white/80 hover:text-white transition-colors cursor-pointer shrink-0"
+          >
+            <span className="text-xl font-light">+</span>
+            <span className="text-sm font-medium">Register</span>
+          </Link>
+        </div>
+      )}
+    </aside>
+  );
+}
+
+function BoardAccessModal({
+  board,
+  workspaceId,
+  authUserId,
+  onClose,
+  onUpdated,
+}: {
+  board: BoardWithWorkspace;
+  workspaceId: string;
+  authUserId: string | null;
+  onClose: () => void;
+  onUpdated: () => void;
+}) {
+  const [members, setMembers] = useState<BoardMember[]>([]);
+  const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMember[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [addingUserId, setAddingUserId] = useState<string | null>(null);
+  const [addError, setAddError] = useState<string | null>(null);
+
+  useEffect(() => {
+    Promise.all([
+      getBoardMembers(board.id),
+      getWorkspaceMembers(workspaceId),
+    ]).then(([{ data: bm }, { data: wm }]) => {
+      setMembers(bm ?? []);
+      setWorkspaceMembers(wm ?? []);
+      setLoading(false);
+    });
+  }, [board.id, workspaceId]);
+
+  const memberIds = new Set(members.map((m) => m.user_id));
+  const availableToAdd = workspaceMembers.filter((m) => !memberIds.has(m.user_id));
+
+  const handleAdd = async (userId: string) => {
+    if (!authUserId) return;
+    setAddingUserId(userId);
+    setAddError(null);
+    const { error } = await addBoardMember(board.id, userId, authUserId);
+    if (error) setAddError(error.message);
+    else {
+      const { data } = await getBoardMembers(board.id);
+      setMembers(data ?? []);
+      onUpdated();
+    }
+    setAddingUserId(null);
+  };
+
+  const handleRemove = async (userId: string) => {
+    if (!authUserId || !confirm("Revoke this user's access to the board?")) return;
+    setAddError(null);
+    const { error } = await removeBoardMember(board.id, userId, authUserId);
+    if (error) setAddError(error.message);
+    else {
+      const { data } = await getBoardMembers(board.id);
+      setMembers(data ?? []);
+      onUpdated();
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60" onClick={onClose}>
+      <div className="bg-navy-950 rounded-2xl shadow-2xl w-full max-w-md max-h-[80vh] flex flex-col overflow-hidden border border-white/10" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-4 border-b border-white/10">
+          <h2 className="text-white font-semibold text-lg">Board access: {board.name}</h2>
+          <button type="button" onClick={onClose} className="p-2 rounded-lg text-white/70 hover:bg-white/10 hover:text-white">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
           </button>
         </div>
+        <p className="px-4 py-2 text-white/60 text-xs">
+          When board has members, only they can see it. Add workspace members to grant access. Remove all to make it visible to everyone in the workspace.
+        </p>
+        {addError && <p className="px-4 text-red-400 text-sm">{addError}</p>}
+        <div className="p-4 border-b border-white/10 space-y-2">
+          <div className="text-navy-400 text-sm font-medium">Add from workspace</div>
+          {availableToAdd.length === 0 ? (
+            <p className="text-white/50 text-sm">All workspace members already have access.</p>
+          ) : (
+            <div className="space-y-1 max-h-32 overflow-y-auto">
+              {availableToAdd.map((m) => (
+                <div key={m.user_id} className="flex items-center justify-between py-2 px-3 rounded-lg bg-white/5">
+                  <span className="text-white text-sm">{m.full_name ?? "Unknown"}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleAdd(m.user_id)}
+                    disabled={addingUserId === m.user_id}
+                    className="px-3 py-1 rounded-lg bg-navy-700 text-white text-xs hover:bg-navy-600 disabled:opacity-50"
+                  >
+                    {addingUserId === m.user_id ? "Adding…" : "Add"}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="flex-1 overflow-y-auto p-4">
+          <div className="text-navy-400 text-sm font-medium mb-2">Board members ({members.length})</div>
+          {loading ? (
+            <p className="text-white/50 text-sm">Loading…</p>
+          ) : members.length === 0 ? (
+            <p className="text-white/50 text-sm">No restrictions. All workspace members can see this board.</p>
+          ) : (
+            <div className="space-y-2">
+              {members.map((m) => {
+                const isAdmin = (m.full_name ?? "").toLowerCase().trim() === "mughis siddiqui";
+                return (
+                  <div key={m.id} className="flex items-center justify-between py-2 px-3 rounded-lg bg-white/5">
+                    <span className="text-white text-sm">{m.full_name ?? "Unknown"}{isAdmin && " (admin)"}</span>
+                    {!isAdmin && (
+                      <button type="button" onClick={() => handleRemove(m.user_id)} className="px-3 py-1 rounded-lg text-red-300 text-xs hover:bg-red-500/20">
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
-    </aside>
+    </div>
   );
 }
 
@@ -284,7 +402,7 @@ function CollaboratorsModal({
     if (members.length >= MEMBER_LIMIT) return;
     setAddingUserId(authId);
     setAddError(null);
-    const { error: addErr } = await addWorkspaceMember(workspace.id, authId);
+    const { error: addErr } = await addWorkspaceMember(workspace.id, authId, authUserId!);
     if (addErr) {
       setAddError(addErr.message);
     } else {
@@ -333,56 +451,58 @@ function CollaboratorsModal({
         </div>
 
         <div className="p-4 border-b border-white/10 space-y-3">
-          <div>
-            <div className="text-navy-400 text-sm font-medium border-b-2 border-navy-400 pb-1 w-fit">
-              Add collaborator
-            </div>
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search users by name or email"
-              className="mt-3 w-full px-3 py-2 rounded-lg bg-navy-900/80 border border-navy-800 text-white text-sm placeholder:text-navy-400 focus:outline-none"
-            />
-            {searchQuery.trim() && (
-              <div className="mt-2 max-h-40 overflow-y-auto rounded-lg bg-navy-950 border border-navy-800 divide-navy-800">
-                {searching ? (
-                  <div className="px-3 py-4 text-white/60 text-sm">Searching…</div>
-                ) : availableToAdd.length === 0 ? (
-                  <div className="px-3 py-4 text-white/60 text-sm">No users found</div>
-                ) : (
-                  availableToAdd.map((u) => (
-                    <div
-                      key={u.auth_id}
-                      className="flex items-center justify-between px-3 py-2 gap-3"
-                    >
-                      <div className="min-w-0">
-                        <p className="text-white text-sm font-medium truncate">
-                          {u.full_name ?? u.email ?? "Unknown"}
-                        </p>
-                        {u.email && (
-                          <p className="text-white/50 text-xs truncate">{u.email}</p>
-                        )}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => handleAddMember(u.auth_id)}
-                        disabled={members.length >= MEMBER_LIMIT || addingUserId === u.auth_id}
-                        className="px-3 py-1.5 rounded-lg bg-navy-700 text-white text-xs font-medium hover:bg-navy-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {addingUserId === u.auth_id ? "Adding…" : "Add"}
-                      </button>
-                    </div>
-                  ))
-                )}
+          {isCurrentUserAdmin && (
+            <div>
+              <div className="text-navy-400 text-sm font-medium border-b-2 border-navy-400 pb-1 w-fit">
+                Add collaborator
               </div>
-            )}
-            {addError && (
-              <p className="text-red-400 text-xs mt-2">
-                {addError}
-              </p>
-            )}
-          </div>
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search users by name or email"
+                className="mt-3 w-full px-3 py-2 rounded-lg bg-navy-900/80 border border-navy-800 text-white text-sm placeholder:text-navy-400 focus:outline-none"
+              />
+              {searchQuery.trim() && (
+                <div className="mt-2 max-h-40 overflow-y-auto rounded-lg bg-navy-950 border border-navy-800 divide-navy-800">
+                  {searching ? (
+                    <div className="px-3 py-4 text-white/60 text-sm">Searching…</div>
+                  ) : availableToAdd.length === 0 ? (
+                    <div className="px-3 py-4 text-white/60 text-sm">No users found</div>
+                  ) : (
+                    availableToAdd.map((u) => (
+                      <div
+                        key={u.auth_id}
+                        className="flex items-center justify-between px-3 py-2 gap-3"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-white text-sm font-medium truncate">
+                            {u.full_name ?? u.email ?? "Unknown"}
+                          </p>
+                          {u.email && (
+                            <p className="text-white/50 text-xs truncate">{u.email}</p>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleAddMember(u.auth_id)}
+                          disabled={members.length >= MEMBER_LIMIT || addingUserId === u.auth_id}
+                          className="px-3 py-1.5 rounded-lg bg-navy-700 text-white text-xs font-medium hover:bg-navy-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {addingUserId === u.auth_id ? "Adding…" : "Add"}
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+              {addError && (
+                <p className="text-red-400 text-xs mt-2">
+                  {addError}
+                </p>
+              )}
+            </div>
+          )}
 
           <div>
             <div className="text-navy-400 text-sm font-medium border-b-2 border-navy-400 pb-1 w-fit">
@@ -516,15 +636,26 @@ export default function Dashboard() {
   const [addWorkspaceName, setAddWorkspaceName] = useState("");
   const [showCreateWorkspace, setShowCreateWorkspace] = useState(false);
   const [showMembersModal, setShowMembersModal] = useState(false);
+  const [showBoardAccessModal, setShowBoardAccessModal] = useState(false);
   const [selectedWorkspaceForMembers, setSelectedWorkspaceForMembers] = useState<Workspace | null>(
     null,
   );
+  const [selectedBoardForAccess, setSelectedBoardForAccess] = useState<BoardWithWorkspace | null>(null);
   const [selectedWorkspaceForBoards, setSelectedWorkspaceForBoards] = useState<Workspace | null>(null);
   const [error, setError] = useState<string | null>(null);
   const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
+
+  const safeBroadcast = () => {
+    try {
+      broadcastChannelRef.current?.postMessage({ type: "broadcast", event: "refresh" });
+    } catch {
+      // Channel may be closed (e.g. user navigated away)
+    }
+  };
   const optimisticallyDeletedBoardIdsRef = useRef<Set<string>>(new Set());
   const optimisticallyDeletedWorkspaceIdsRef = useRef<Set<string>>(new Set());
   const creatingWorkspaceRef = useRef(false);
+  const isAdmin = (user?.full_name ?? "").toLowerCase().trim() === ADMIN_CAN_CREATE_WORKSPACE.toLowerCase();
 
   const refreshDashboard = async () => {
     if (!authUserId) return;
@@ -535,7 +666,7 @@ export default function Dashboard() {
     }
     const allBoards: BoardWithWorkspace[] = [];
     for (const w of ws ?? []) {
-      const { data: b } = await getBoardsByWorkspace(w.id);
+      const { data: b } = await getBoardsAccessibleToUser(w.id, authUserId);
       (b ?? []).forEach((board) =>
         allBoards.push({ ...board, workspaceName: w.name }),
       );
@@ -588,7 +719,7 @@ export default function Dashboard() {
         setWorkspaces(ws ?? []);
         const allBoards: BoardWithWorkspace[] = [];
         for (const w of ws ?? []) {
-          const { data: b } = await getBoardsByWorkspace(w.id);
+          const { data: b } = await getBoardsAccessibleToUser(w.id, u.id);
           (b ?? []).forEach((board) =>
             allBoards.push({ ...board, workspaceName: w.name }),
           );
@@ -621,11 +752,12 @@ export default function Dashboard() {
     const supabase = createClient();
     const onRefresh = () => {
       refreshDashboard();
-      broadcastChannelRef.current?.postMessage({ type: "broadcast", event: "refresh" });
+      safeBroadcast();
     };
     const channel = supabase
       .channel("dashboard-realtime")
       .on("postgres_changes", { event: "*", schema: "public", table: "boards" }, onRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "board_members" }, onRefresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "workspace" }, onRefresh)
       .subscribe();
     return () => {
@@ -633,7 +765,7 @@ export default function Dashboard() {
     };
   }, [authUserId]);
 
-  // Polling fallback: refresh every 3s
+  // Polling fallback: refresh every 5s
   useEffect(() => {
     if (!authUserId) return;
     let cancelled = false;
@@ -642,7 +774,7 @@ export default function Dashboard() {
     };
     const id = setInterval(() => {
       if (!cancelled) poll();
-    }, 30000);
+    }, 5000);
     return () => {
       cancelled = true;
       clearInterval(id);
@@ -659,6 +791,12 @@ export default function Dashboard() {
   const handleCreateWorkspace = async () => {
     const name = addWorkspaceName.trim();
     if (!name || !authUserId) return;
+    const canCreate =
+      (user?.full_name ?? "").toLowerCase().trim() === ADMIN_CAN_CREATE_WORKSPACE.toLowerCase();
+    if (!canCreate) {
+      setError("Only the admin (Mughis Siddiqui) can create workspaces.");
+      return;
+    }
     if (creatingWorkspaceRef.current) return;
     creatingWorkspaceRef.current = true;
     setError(null);
@@ -684,7 +822,7 @@ export default function Dashboard() {
         data,
         ...prev.filter((w) => w.id !== tempId && w.id !== data.id),
       ]);
-      broadcastChannelRef.current?.postMessage({ type: "broadcast", event: "refresh" });
+      safeBroadcast();
     }
   };
 
@@ -706,7 +844,7 @@ export default function Dashboard() {
     setAddBoardName("");
     setAddBoardWorkspaceId(null);
 
-    const { data, error: createErr } = await createBoard(workspaceId, name);
+    const { data, error: createErr } = await createBoard(workspaceId, name, authUserId);
     if (createErr) {
       setError(normalizeNetworkError(createErr.message));
       setBoards((prev) => prev.filter((b) => b.id !== tempId));
@@ -718,7 +856,7 @@ export default function Dashboard() {
         { ...data, workspaceName },
         ...prev.filter((b) => b.id !== tempId && b.id !== data.id),
       ]);
-      broadcastChannelRef.current?.postMessage({ type: "broadcast", event: "refresh" });
+      safeBroadcast();
     }
   };
 
@@ -728,7 +866,7 @@ export default function Dashboard() {
     optimisticallyDeletedBoardIdsRef.current.add(board.id);
     setBoards((prev) => prev.filter((b) => b.id !== board.id));
 
-    const { error: delErr } = await deleteBoard(board.id);
+    const { error: delErr } = await deleteBoard(board.id, authUserId!);
     if (delErr) {
       setError(normalizeNetworkError(delErr.message));
       optimisticallyDeletedBoardIdsRef.current.delete(board.id);
@@ -745,7 +883,7 @@ export default function Dashboard() {
     setWorkspaces((prev) => prev.filter((w) => w.id !== ws.id));
     setBoards((prev) => prev.filter((b) => b.workspace_id !== ws.id));
 
-    const { error: delErr } = await deleteWorkspace(ws.id);
+    const { error: delErr } = await deleteWorkspace(ws.id, authUserId!);
     if (delErr) {
       setError(normalizeNetworkError(delErr.message));
       optimisticallyDeletedWorkspaceIdsRef.current.delete(ws.id);
@@ -810,6 +948,7 @@ export default function Dashboard() {
       <div className="flex flex-1 min-h-0">
         <Sidebar
           workspaces={workspaces}
+          isAdmin={isAdmin}
           onBoardsClick={(ws) => {
             setSelectedWorkspaceForBoards(ws);
             setShowBoards(true);
@@ -879,14 +1018,27 @@ export default function Dashboard() {
                         </p>
                       </div>
                     </Link>
-                    <button
-                      type="button"
-                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleDeleteBoard(board); }}
-                      className="absolute top-1.5 right-1.5 p-1.5 rounded-lg bg-black/50 hover:bg-red-500/80 text-white/80 hover:text-white transition-colors"
-                      aria-label="Delete board"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /><line x1="10" x2="10" y1="11" y2="17" /><line x1="14" x2="14" y1="11" y2="17" /></svg>
-                    </button>
+                    {isAdmin && (
+                    <div className="absolute top-1.5 right-1.5 flex gap-1">
+                      <button
+                        type="button"
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setSelectedBoardForAccess(board); setShowBoardAccessModal(true); }}
+                        className="p-1.5 rounded-lg bg-black/50 hover:bg-navy-600 text-white/80 hover:text-white transition-colors"
+                        aria-label="Board access"
+                        title="Board access"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleDeleteBoard(board); }}
+                        className="p-1.5 rounded-lg bg-black/50 hover:bg-red-500/80 text-white/80 hover:text-white transition-colors"
+                        aria-label="Delete board"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /><line x1="10" x2="10" y1="11" y2="17" /><line x1="14" x2="14" y1="11" y2="17" /></svg>
+                      </button>
+                    </div>
+                    )}
                   </div>
                 ))}
 
@@ -1013,6 +1165,7 @@ export default function Dashboard() {
                             </svg>
                             Settings
                           </Link>
+                          {isAdmin && (
                           <button
                             type="button"
                             onClick={() => handleDeleteWorkspace(ws)}
@@ -1035,6 +1188,7 @@ export default function Dashboard() {
                               <line x1="14" x2="14" y1="11" y2="17" />
                             </svg>
                           </button>
+                          )}
                         </div>
                       </div>
                       <div className="flex gap-4 overflow-x-auto pb-2">
@@ -1057,14 +1211,27 @@ export default function Dashboard() {
                                 </p>
                               </div>
                             </Link>
-                            <button
-                              type="button"
-                              onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleDeleteBoard(board); }}
-                              className="absolute top-1 right-1 p-1 rounded-lg bg-black/50 hover:bg-red-500/80 text-white/80 hover:text-white transition-colors"
-                              aria-label="Delete board"
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /><line x1="10" x2="10" y1="11" y2="17" /><line x1="14" x2="14" y1="11" y2="17" /></svg>
-                            </button>
+                            {isAdmin && (
+                            <div className="absolute top-1 right-1 flex gap-0.5">
+                              <button
+                                type="button"
+                                onClick={(e) => { e.preventDefault(); e.stopPropagation(); setSelectedBoardForAccess(board); setShowBoardAccessModal(true); }}
+                                className="p-1 rounded-lg bg-black/50 hover:bg-navy-600 text-white/80 hover:text-white transition-colors"
+                                aria-label="Board access"
+                                title="Board access"
+                              >
+                                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleDeleteBoard(board); }}
+                                className="p-1 rounded-lg bg-black/50 hover:bg-red-500/80 text-white/80 hover:text-white transition-colors"
+                                aria-label="Delete board"
+                              >
+                                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /><line x1="10" x2="10" y1="11" y2="17" /><line x1="14" x2="14" y1="11" y2="17" /></svg>
+                              </button>
+                            </div>
+                            )}
                           </div>
                         ))}
                         {isCreatingBoard ? (
@@ -1121,52 +1288,54 @@ export default function Dashboard() {
                   );
                 })}
 
-                {showCreateWorkspace ? (
-                  <div className="rounded-xl bg-white/5 border border-white/10 p-5 max-w-md">
-                    <input
-                      type="text"
-                      value={addWorkspaceName}
-                      onChange={(e) => setAddWorkspaceName(e.target.value)}
-                      placeholder="Workspace name"
-                      className="w-full px-4 py-2 rounded-xl bg-navy-900/80 border border-navy-800 text-white text-sm placeholder:text-navy-400 focus:outline-none focus:ring-1 focus:ring-navy-400 mb-3"
-                      autoFocus
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") handleCreateWorkspace();
-                        if (e.key === "Escape") {
-                          setShowCreateWorkspace(false);
-                          setAddWorkspaceName("");
-                        }
-                      }}
-                    />
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={handleCreateWorkspace}
-                        className="px-4 py-2 bg-navy-700 text-white text-sm font-medium rounded-xl hover:bg-navy-600"
-                      >
-                        Create
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowCreateWorkspace(false);
-                          setAddWorkspaceName("");
+                {(user?.full_name ?? "").toLowerCase().trim() === ADMIN_CAN_CREATE_WORKSPACE.toLowerCase() && (
+                  showCreateWorkspace ? (
+                    <div className="rounded-xl bg-white/5 border border-white/10 p-5 max-w-md">
+                      <input
+                        type="text"
+                        value={addWorkspaceName}
+                        onChange={(e) => setAddWorkspaceName(e.target.value)}
+                        placeholder="Workspace name"
+                        className="w-full px-4 py-2 rounded-xl bg-navy-900/80 border border-navy-800 text-white text-sm placeholder:text-navy-400 focus:outline-none focus:ring-1 focus:ring-navy-400 mb-3"
+                        autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") handleCreateWorkspace();
+                          if (e.key === "Escape") {
+                            setShowCreateWorkspace(false);
+                            setAddWorkspaceName("");
+                          }
                         }}
-                        className="px-3 py-2 text-navy-400 hover:text-white text-sm"
-                      >
-                        Cancel
-                      </button>
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={handleCreateWorkspace}
+                          className="px-4 py-2 bg-navy-700 text-white text-sm font-medium rounded-xl hover:bg-navy-600"
+                        >
+                          Create
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowCreateWorkspace(false);
+                            setAddWorkspaceName("");
+                          }}
+                          className="px-3 py-2 text-navy-400 hover:text-white text-sm"
+                        >
+                          Cancel
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setShowCreateWorkspace(true)}
-                    className="flex items-center gap-2 px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 border-2 border-dashed border-white/20 hover:border-white/40 text-white/60 hover:text-white/80 transition-all"
-                  >
-                    <span className="text-lg">+</span>
-                    <span className="text-sm font-medium">Create new workspace</span>
-                  </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setShowCreateWorkspace(true)}
+                      className="flex items-center gap-2 px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 border-2 border-dashed border-white/20 hover:border-white/40 text-white/60 hover:text-white/80 transition-all"
+                    >
+                      <span className="text-lg">+</span>
+                      <span className="text-sm font-medium">Create new workspace</span>
+                    </button>
+                  )
                 )}
               </div>
             </section>
@@ -1181,6 +1350,22 @@ export default function Dashboard() {
           onClose={() => {
             setShowMembersModal(false);
             setSelectedWorkspaceForMembers(null);
+          }}
+        />
+      )}
+
+      {showBoardAccessModal && selectedBoardForAccess && (
+        <BoardAccessModal
+          board={selectedBoardForAccess}
+          workspaceId={selectedBoardForAccess.workspace_id}
+          authUserId={authUserId}
+          onClose={() => {
+            setShowBoardAccessModal(false);
+            setSelectedBoardForAccess(null);
+          }}
+          onUpdated={() => {
+            refreshDashboard();
+            safeBroadcast();
           }}
         />
       )}

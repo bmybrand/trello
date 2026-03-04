@@ -40,7 +40,7 @@ import {
 import {
   getWorkspace,
   getWorkspacesForUser,
-  getBoardsByWorkspace,
+  getBoardsAccessibleToUser,
   createBoard,
   deleteBoard,
   isWorkspaceMember,
@@ -361,6 +361,8 @@ export default function WorkspacePage() {
   const commentsJustAddedRef = useRef<number>(0);
   const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
 
+  const ADMIN_CAN_CREATE_WORKSPACE = "mughis siddiqui";
+  const isAdmin = (user?.full_name ?? "").toLowerCase().trim() === ADMIN_CAN_CREATE_WORKSPACE.toLowerCase();
   const currentBoard = boards.find((b) => b.id === currentBoardId);
   const lists = currentBoardId ? (boardData[currentBoardId] ?? getEmptyListsForBoard(currentBoardId)) : [];
   const setLists = (updater: (prev: List[]) => List[]) => {
@@ -387,7 +389,7 @@ export default function WorkspacePage() {
       const [wsRes, wsListRes, boardsRes, memberRes] = await Promise.all([
         getWorkspace(workspaceId),
         getWorkspacesForUser(u.id),
-        getBoardsByWorkspace(workspaceId),
+        getBoardsAccessibleToUser(workspaceId, u.id),
         isWorkspaceMember(workspaceId, u.id),
       ]);
 
@@ -773,7 +775,7 @@ export default function WorkspacePage() {
     setShowNewBoard(false);
     if (showBoardPopup) setShowBoardPopup(false);
 
-    const { data, error } = await createBoard(workspaceId, name);
+    const { data, error } = await createBoard(workspaceId, name, authUserId);
     if (error) {
       setAddCardError(error.message);
       setBoards((prev) => prev.filter((b) => b.id !== tempId));
@@ -929,7 +931,7 @@ export default function WorkspacePage() {
     if (wasCurrent) setCurrentBoardId(nextId);
     setShowBoardPopup(false);
 
-    const { error } = await deleteBoard(b.id);
+    const { error } = await deleteBoard(b.id, authUserId!);
     if (error) {
       setAddCardError(error.message);
       setBoards((prev) => [...prev, b]);
@@ -1207,9 +1209,11 @@ export default function WorkspacePage() {
                   <button type="button" onClick={() => { setCurrentBoardId(b.id); setShowBoardPopup(false); }} className={`flex-1 text-left px-4 py-3 rounded-xl font-medium ${currentBoardId === b.id ? "bg-navy-700 text-white" : "bg-white/5 text-white/90 hover:bg-white/10"}`}>
                     {b.name}
                   </button>
+                  {isAdmin && (
                   <button type="button" onClick={() => handleDeleteBoard(b)} className="p-2 rounded-lg text-white/50 hover:bg-red-500/20 hover:text-red-400 transition-colors" aria-label="Delete board">
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /><line x1="10" x2="10" y1="11" y2="17" /><line x1="14" x2="14" y1="11" y2="17" /></svg>
                   </button>
+                  )}
                 </li>
               ))}
             </ul>

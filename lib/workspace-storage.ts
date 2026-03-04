@@ -21,6 +21,15 @@ export type Board = {
   created_at: string;
 };
 
+export type BoardMember = {
+  id: number;
+  board_id: string;
+  user_id: string;
+  role: string | null;
+  created_at: string;
+  full_name?: string | null;
+};
+
 /** Get workspaces the user is a member of. */
 export async function getWorkspacesForUser(userId: string): Promise<{
   data: Workspace[] | null;
@@ -58,12 +67,24 @@ export async function getWorkspace(workspaceId: string): Promise<{
   return { data: data as Workspace, error: null };
 }
 
-/** Create a workspace and add the creator as a member. */
+/** Only this user can create workspaces. Hardcoded admin. */
+const ADMIN_CAN_CREATE_WORKSPACE = "mughis siddiqui";
+
+/** Create a workspace and add the creator as a member. Only the admin (Mughis Siddiqui) can create. */
 export async function createWorkspace(
   name: string,
   creatorUserId: string
 ): Promise<{ data: Workspace | null; error: Error | null }> {
   const supabase = createClient();
+  const { data: userRow } = await supabase
+    .from("users")
+    .select("full_name")
+    .eq("auth_id", creatorUserId)
+    .single();
+  const fullName = ((userRow as { full_name?: string } | null)?.full_name ?? "").toLowerCase().trim();
+  if (fullName !== ADMIN_CAN_CREATE_WORKSPACE.toLowerCase()) {
+    return { data: null, error: new Error("Only the admin can create workspaces.") };
+  }
   const { data: created, error: workspaceError } = await supabase
     .from("workspace")
     .insert({
@@ -89,9 +110,19 @@ export async function createWorkspace(
   };
 }
 
-/** Delete a workspace and all related data (boards, members, board cards, list order, cards, items, comments, activities). */
-export async function deleteWorkspace(workspaceId: string): Promise<{ error: Error | null }> {
+/** Check if user (auth_id) is the admin. Only admin can delete workspaces/boards and add members. */
+async function isAdmin(supabase: ReturnType<typeof createClient>, authId: string): Promise<boolean> {
+  const { data } = await supabase.from("users").select("full_name").eq("auth_id", authId).single();
+  const name = ((data as { full_name?: string } | null)?.full_name ?? "").toLowerCase().trim();
+  return name === ADMIN_CAN_CREATE_WORKSPACE.toLowerCase();
+}
+
+/** Delete a workspace and all related data (boards, members, board cards, list order, cards, items, comments, activities). Only admin can delete. */
+export async function deleteWorkspace(workspaceId: string, requesterAuthId: string): Promise<{ error: Error | null }> {
   const supabase = createClient();
+  if (!(await isAdmin(supabase, requesterAuthId))) {
+    return { error: new Error("Only the admin can delete workspaces.") };
+  }
   const { data: boards } = await getBoardsByWorkspace(workspaceId);
   const boardIds = (boards ?? []).map((b) => String(b.id));
 
@@ -102,8 +133,9 @@ export async function deleteWorkspace(workspaceId: string): Promise<{ error: Err
     (rows ?? []).forEach((r: { cardid: number }) => cardIds.add(r.cardid));
   }
 
-  // Delete board placements, list order, and empty column rows in cardslist
+  // Delete board members, placements, list order, and empty column rows
   for (const bid of boardIds) {
+    await supabase.from("board_members").delete().eq("board_id", bid);
     await supabase.from("boardcards").delete().eq("boardname", bid);
     await supabase.from("board_list_order").delete().eq("boardname", bid);
     await supabase.from("cardslist").delete().eq("board_id", bid).is("carditemid", null);
@@ -214,12 +246,16 @@ export async function getWorkspaceMembers(workspaceId: string): Promise<{
   return { data, error: null };
 }
 
-/** Add a user to a workspace. userId = auth_id (uuid) from auth.users. */
+/** Add a user to a workspace. userId = auth_id (uuid) from auth.users. Only admin can add members. */
 export async function addWorkspaceMember(
   workspaceId: string,
-  userId: string
+  userId: string,
+  requesterAuthId: string
 ): Promise<{ error: Error | null }> {
   const supabase = createClient();
+  if (!(await isAdmin(supabase, requesterAuthId))) {
+    return { error: new Error("Only the admin can add members.") };
+  }
   const { error } = await supabase.from("workspace_members").insert({
     workspace_id: workspaceId,
     user_id: userId,
@@ -242,7 +278,7 @@ export async function removeWorkspaceMember(
   return { error };
 }
 
-/** Get boards in a workspace. */
+/** Get boards in a workspace (all boards, no access filter). */
 export async function getBoardsByWorkspace(workspaceId: string): Promise<{
   data: Board[] | null;
   error: Error | null;
@@ -257,10 +293,106 @@ export async function getBoardsByWorkspace(workspaceId: string): Promise<{
   return { data: (data ?? []) as Board[], error: null };
 }
 
-/** Create a board in a workspace. */
+/** Get boards accessible to a user in a workspace. If a board has no board_members, all workspace members see it. If it has board_members, only those users see it. */
+export async function getBoardsAccessibleToUser(
+  workspaceId: string,
+  userId: string
+): Promise<{ data: Board[] | null; error: Error | null }> {
+  const { data: allBoards, error: boardsErr } = await getBoardsByWorkspace(workspaceId);
+  if (boardsErr || !allBoards?.length) return { data: allBoards ?? [], error: boardsErr };
+  const supabase = createClient();
+  const boardIds = allBoards.map((b) => String(b.id));
+  const { data: bmRows } = await supabase
+    .from("board_members")
+    .select("board_id, user_id")
+    .in("board_id", boardIds);
+  const boardsWithRestrictions = new Set<string>();
+  const userBoards = new Set<string>();
+  (bmRows ?? []).forEach((r: { board_id: string; user_id: string }) => {
+    const bid = String(r.board_id);
+    boardsWithRestrictions.add(bid);
+    if (r.user_id === userId) userBoards.add(bid);
+  });
+  const accessible = allBoards.filter((b) => {
+    const bid = String(b.id);
+    return !boardsWithRestrictions.has(bid) || userBoards.has(bid);
+  });
+  return { data: accessible, error: null };
+}
+
+/** Get board members with full_name. */
+export async function getBoardMembers(boardId: string): Promise<{
+  data: BoardMember[] | null;
+  error: Error | null;
+}> {
+  const supabase = createClient();
+  const { data: rows, error } = await supabase
+    .from("board_members")
+    .select("id, board_id, user_id, role, created_at")
+    .eq("board_id", String(boardId))
+    .order("created_at", { ascending: true });
+  if (error) return { data: null, error };
+  if (!rows?.length) return { data: [], error: null };
+  const userIds = [...new Set((rows as { user_id: string }[]).map((r) => r.user_id))];
+  const { data: users } = await supabase.from("users").select("auth_id, full_name").in("auth_id", userIds);
+  const nameByAuthId = new Map(
+    (users ?? []).map((u: { auth_id: string; full_name: string | null }) => [u.auth_id, u.full_name])
+  );
+  const data = (rows as BoardMember[]).map((r) => ({
+    ...r,
+    full_name: nameByAuthId.get(r.user_id) ?? null,
+  }));
+  return { data, error: null };
+}
+
+/** Add a user to a board. Only admin can add. */
+export async function addBoardMember(
+  boardId: string,
+  userId: string,
+  requesterAuthId: string,
+  role = "member"
+): Promise<{ error: Error | null }> {
+  const supabase = createClient();
+  if (!(await isAdmin(supabase, requesterAuthId))) {
+    return { error: new Error("Only the admin can manage board access.") };
+  }
+  const { error } = await supabase.from("board_members").insert({
+    board_id: String(boardId),
+    user_id: userId,
+    role: role.trim() || "member",
+    created_at: new Date().toISOString(),
+  });
+  return { error };
+}
+
+/** Remove a user from a board. Only admin can remove. Admin cannot remove themselves. */
+export async function removeBoardMember(
+  boardId: string,
+  userId: string,
+  requesterAuthId: string
+): Promise<{ error: Error | null }> {
+  const supabase = createClient();
+  if (!(await isAdmin(supabase, requesterAuthId))) {
+    return { error: new Error("Only the admin can manage board access.") };
+  }
+  const { data: userRow } = await supabase.from("users").select("full_name").eq("auth_id", userId).single();
+  const fullName = ((userRow as { full_name?: string } | null)?.full_name ?? "").toLowerCase().trim();
+  if (fullName === ADMIN_CAN_CREATE_WORKSPACE.toLowerCase()) {
+    return { error: new Error("The admin cannot be removed from board access.") };
+  }
+  const { error } = await supabase
+    .from("board_members")
+    .delete()
+    .eq("board_id", String(boardId))
+    .eq("user_id", userId);
+  return { error };
+}
+
+/** Create a board in a workspace. Admin is automatically added to board_members and cannot be removed. Creator is also added. */
 export async function createBoard(
   workspaceId: string,
-  name: string
+  name: string,
+  creatorUserId?: string
 ): Promise<{ data: Board | null; error: Error | null }> {
   const supabase = createClient();
   const { data: created, error } = await supabase
@@ -273,17 +405,39 @@ export async function createBoard(
     .select("id, name, workspace_id, created_at")
     .single();
   if (error) return { data: null, error };
+  if (created?.id) {
+    const bid = String(created.id);
+    const toAdd = new Set<string>();
+    if (creatorUserId) toAdd.add(creatorUserId);
+    const { data: adminRow } = await supabase
+      .from("users")
+      .select("auth_id")
+      .ilike("full_name", ADMIN_CAN_CREATE_WORKSPACE)
+      .limit(1)
+      .maybeSingle();
+    const adminAuthId = (adminRow as { auth_id?: string } | null)?.auth_id;
+    if (adminAuthId) toAdd.add(adminAuthId);
+    for (const uid of toAdd) {
+      await supabase.from("board_members").insert({
+        board_id: bid,
+        user_id: uid,
+        role: uid === adminAuthId ? "admin" : "member",
+        created_at: new Date().toISOString(),
+      });
+    }
+  }
   return {
-    // Preserve the exact types Supabase returns so workspace_id
-    // stays consistent with getBoardsByWorkspace.
     data: (created ?? null) as unknown as Board | null,
     error: null,
   };
 }
 
-/** Delete a board and all its boardcards, list order, cards, items, comments, and activities. */
-export async function deleteBoard(boardId: string): Promise<{ error: Error | null }> {
+/** Delete a board and all its boardcards, list order, cards, items, comments, and activities. Only admin can delete. */
+export async function deleteBoard(boardId: string, requesterAuthId: string): Promise<{ error: Error | null }> {
   const supabase = createClient();
+  if (!(await isAdmin(supabase, requesterAuthId))) {
+    return { error: new Error("Only the admin can delete boards.") };
+  }
   const bid = String(boardId);
 
   // 1. Collect all card IDs and their item IDs BEFORE any deletes
@@ -298,7 +452,8 @@ export async function deleteBoard(boardId: string): Promise<{ error: Error | nul
     if (r.carditemid != null) itemIdsOnBoard.add(r.carditemid);
   });
 
-  // 2. Delete board–card links and list order
+  // 2. Delete board members, board–card links, and list order
+  await supabase.from("board_members").delete().eq("board_id", bid);
   await supabase.from("boardcards").delete().eq("boardname", bid);
   await supabase.from("board_list_order").delete().eq("boardname", bid);
 
