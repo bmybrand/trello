@@ -1,32 +1,56 @@
 import { createClient as createSupabaseClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Session } from "@supabase/supabase-js";
 
-const SESSION_CACHE_MS = 60_000; // 60s to reduce auth API calls and avoid rate limit
+const SESSION_CACHE_MS = 1_800_000; // 15 min - avoid auth API rate limit
+const RATE_LIMIT_BACKOFF_MS = 3_600_000; // 30 min backoff after rate limit
 
 let sessionCache: { session: Session | null; timestamp: number } | null = null;
 let pendingFetch: Promise<Session | null> | null = null;
+let rateLimitedUntil = 0; // don't call auth API until this time
 
 let clientInstance: SupabaseClient | null = null;
 
+const isBrowser = typeof window !== "undefined";
+let createClientCallCount = 0;
+let createClientNewCount = 0;
+
 export function createClient() {
-  if (typeof window !== "undefined" && clientInstance) return clientInstance;
+  createClientCallCount++;
+  if (isBrowser && clientInstance) {
+    if (createClientCallCount <= 2 || createClientCallCount % 100 === 0) {
+      console.log("[Supabase] createClient() cached (call #" + createClientCallCount + ")");
+    }
+    return clientInstance;
+  }
   const key =
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ??
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY;
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   if (!url || !key) throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or Supabase anon key");
-  const client = createSupabaseClient(url, key);
-  if (typeof window !== "undefined") clientInstance = client;
+  createClientNewCount++;
+  console.warn(
+    "[Supabase] createClient() NEW instance (new #" + createClientNewCount + ", total #" + createClientCallCount + ")"
+  );
+  const client = createSupabaseClient(url, key, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+    },
+  });
+  if (isBrowser) clientInstance = client;
   return client;
 }
 
 function isRateLimitError(err: unknown): boolean {
   if (!err || typeof err !== "object") return false;
   const msg = "message" in err ? String((err as { message?: string }).message) : "";
+  const name = "name" in err ? String((err as { name?: string }).name) : "";
   const status = "status" in err ? (err as { status?: number }).status : undefined;
   const code = "code" in err ? String((err as { code?: string }).code) : "";
   return (
     msg.toLowerCase().includes("rate limit") ||
+    name === "AuthApiError" && msg.toLowerCase().includes("rate") ||
     status === 429 ||
     code === "over_request_rate_limit"
   );
@@ -43,9 +67,39 @@ function isNetworkError(err: unknown): boolean {
   );
 }
 
-/** Get session with cache and rate-limit handling. Falls back to cached session on rate limit. */
+/** When rate limited with no cache (e.g. after reload), try to restore session from localStorage so reload doesn't log user out. */
+function getSessionFromLocalStorage(): Session | null {
+  if (!isBrowser || typeof localStorage === "undefined") return null;
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key || !key.endsWith("-auth-token")) continue;
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      const data = JSON.parse(raw) as { current_session?: Session; session?: Session };
+      const session = data?.current_session ?? data?.session ?? null;
+      if (session?.user) return session as Session;
+    }
+  } catch {
+    // ignore parse errors
+  }
+  return null;
+}
+
+/** Get session with cache and rate-limit handling. Avoids auth API when rate limited. */
 export async function getCachedSession(): Promise<Session | null> {
   const now = Date.now();
+  if (now < rateLimitedUntil) {
+    if (sessionCache) return sessionCache.session;
+    if (isBrowser) {
+      const fromStorage = getSessionFromLocalStorage();
+      if (fromStorage) {
+        sessionCache = { session: fromStorage, timestamp: Date.now() };
+        return fromStorage;
+      }
+    }
+    return null;
+  }
   if (sessionCache && now - sessionCache.timestamp < SESSION_CACHE_MS) {
     return sessionCache.session;
   }
@@ -60,11 +114,19 @@ export async function getCachedSession(): Promise<Session | null> {
       return session;
     } catch (err) {
       if (isRateLimitError(err)) {
+        rateLimitedUntil = Date.now() + RATE_LIMIT_BACKOFF_MS;
         if (sessionCache) {
-          // Extend cache so we don't retry immediately
           sessionCache = { ...sessionCache, timestamp: Date.now() };
+          if (isBrowser) console.warn("[Supabase] Rate limit; using cached session for 1 hour");
           return sessionCache.session;
         }
+        const fromStorage = getSessionFromLocalStorage();
+        if (fromStorage) {
+          sessionCache = { session: fromStorage, timestamp: Date.now() };
+          if (isBrowser) console.warn("[Supabase] Rate limit; restored session from localStorage");
+          return fromStorage;
+        }
+        if (isBrowser) console.warn("[Supabase] Rate limit; no cached session");
         return null;
       }
       if (isNetworkError(err)) {
@@ -80,9 +142,20 @@ export async function getCachedSession(): Promise<Session | null> {
   return pendingFetch;
 }
 
+/** Get session with one retry after delay. Use on initial load so session can rehydrate from storage. */
+export async function getSessionWithRetry(retryDelayMs = 400): Promise<Session | null> {
+  let session = await getCachedSession();
+  if (session?.user) return session;
+  if (retryDelayMs > 0 && isBrowser) {
+    await new Promise((r) => setTimeout(r, retryDelayMs));
+    session = await getCachedSession();
+  }
+  return session ?? null;
+}
+
 export function clearSessionCache() {
   sessionCache = null;
-  clientInstance = null;
+  rateLimitedUntil = 0;
 }
 
 const COVERS_BUCKET = "covers";

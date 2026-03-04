@@ -98,6 +98,74 @@ export async function createCard(
   return { data: data?.id ?? null, error: null };
 }
 
+/** Create an empty column placeholder in cardslist (carditemid = null). Use when adding a list with no cards. */
+export async function createEmptyColumnInCardslist(
+  boardId: string,
+  listName: string,
+  position: number
+): Promise<{ error: Error | null }> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("cardslist")
+    .insert({
+      carditemid: null,
+      cardname: listName.trim(),
+      board_id: String(boardId).trim(),
+      position,
+    });
+  return { error: error as Error | null };
+}
+
+/** Update an empty column's name in cardslist (rows with carditemid = null). */
+export async function updateEmptyColumnInCardslist(
+  boardId: string,
+  oldListName: string,
+  newListName: string
+): Promise<{ error: Error | null }> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("cardslist")
+    .update({ cardname: newListName.trim() })
+    .eq("board_id", String(boardId).trim())
+    .eq("cardname", oldListName.trim())
+    .is("carditemid", null);
+  return { error: error as Error | null };
+}
+
+/** Delete empty column placeholder(s) from cardslist (rows with carditemid = null). */
+export async function deleteEmptyColumnFromCardslist(
+  boardId: string,
+  listName: string
+): Promise<{ error: Error | null }> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from("cardslist")
+    .delete()
+    .eq("board_id", String(boardId).trim())
+    .eq("cardname", listName.trim())
+    .is("carditemid", null);
+  return { error: error as Error | null };
+}
+
+/** Update empty column positions in cardslist. */
+export async function updateEmptyColumnPositionsInCardslist(
+  boardId: string,
+  listOrder: Array<{ listname: string; position: number }>
+): Promise<{ error: Error | null }> {
+  const supabase = createClient();
+  const bid = String(boardId).trim();
+  for (let i = 0; i < listOrder.length; i++) {
+    const { error } = await supabase
+      .from("cardslist")
+      .update({ position: i })
+      .eq("board_id", bid)
+      .eq("cardname", listOrder[i].listname.trim())
+      .is("carditemid", null);
+    if (error) return { error: error as Error };
+  }
+  return { error: null };
+}
+
 /** Update a card's list (cardname = list/column name). */
 export async function updateCardList(
   cardId: number,
@@ -169,6 +237,12 @@ export async function addCardToBoard(
     .single();
 
   if (error) return { data: null, error };
+  // Also store the board id on the card itself so cardslist.board_id stays in sync.
+  await supabase
+    .from("cardslist")
+    .update({ board_id: boardName })
+    .eq("id", cardId);
+
   return { data: data?.id ?? null, error: null };
 }
 
@@ -246,7 +320,66 @@ export async function removeCardFromBoard(
     .eq("cardid", cardId)
     .eq("boardname", String(boardName ?? "").trim());
 
-  return { error };
+  if (error) return { error };
+
+  // Clear the board_id on the card when it is no longer on this board.
+  await supabase
+    .from("cardslist")
+    .update({ board_id: null })
+    .eq("id", cardId);
+
+  return { error: null };
+}
+
+/** Delete a card everywhere and remove its item/comments/activities if no other cards reference that item. */
+export async function deleteCardAndItem(
+  cardId: number
+): Promise<{ error: Error | null }> {
+  const supabase = createClient();
+
+  // Look up the linked item id
+  const { data: cardRow, error: cardErr } = await supabase
+    .from("cardslist")
+    .select("carditemid")
+    .eq("id", cardId)
+    .maybeSingle();
+  if (cardErr) return { error: cardErr as unknown as Error };
+  const itemId = (cardRow?.carditemid as number | null) ?? null;
+
+  // Remove placements on all boards
+  const { error: bcErr } = await supabase
+    .from("boardcards")
+    .delete()
+    .eq("cardid", cardId);
+  if (bcErr) return { error: bcErr as unknown as Error };
+
+  // Remove the card itself
+  const { error: cErr } = await supabase
+    .from("cardslist")
+    .delete()
+    .eq("id", cardId);
+  if (cErr) return { error: cErr as unknown as Error };
+
+  if (itemId != null) {
+    // Check if any other cards still reference this item
+    const { data: otherCards, error: otherErr } = await supabase
+      .from("cardslist")
+      .select("id")
+      .eq("carditemid", itemId)
+      .limit(1);
+    if (otherErr) return { error: otherErr as unknown as Error };
+    if (!otherCards?.length) {
+      await supabase.from("item_comments").delete().eq("item_id", itemId);
+      await supabase.from("item_activities").delete().eq("item_id", itemId);
+      const { error: itemErr } = await supabase
+        .from("itemslist")
+        .delete()
+        .eq("id", itemId);
+      if (itemErr) return { error: itemErr as unknown as Error };
+    }
+  }
+
+  return { error: null };
 }
 
 /** Get all cards for a board with position. Ordered by list then position. */

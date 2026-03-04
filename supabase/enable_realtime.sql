@@ -6,3 +6,6 @@ ALTER PUBLICATION supabase_realtime ADD TABLE boardcards;
 ALTER PUBLICATION supabase_realtime ADD TABLE cardslist;
 ALTER PUBLICATION supabase_realtime ADD TABLE itemslist;
 ALTER PUBLICATION supabase_realtime ADD TABLE item_comments;
+ALTER PUBLICATION supabase_realtime ADD TABLE boards;
+ALTER PUBLICATION supabase_realtime ADD TABLE workspace;
+ALTER PUBLICATION supabase_realtime ADD TABLE board_list_order;

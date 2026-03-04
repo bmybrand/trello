@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useForm, SubmitHandler } from "react-hook-form";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { createClient, clearSessionCache } from "@/lib/supabase";
+import { createClient, clearSessionCache, getSessionWithRetry } from "@/lib/supabase";
 
 type FormValues = {
   email: string;
@@ -14,6 +14,18 @@ type FormValues = {
 export default function Login() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [checking, setChecking] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      const session = await getSessionWithRetry(400);
+      if (session?.user) {
+        router.replace("/dashboard");
+        return;
+      }
+      setChecking(false);
+    })();
+  }, [router]);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   const { register, handleSubmit, formState: { errors } } = useForm<FormValues>();
@@ -36,6 +48,8 @@ export default function Login() {
     clearSessionCache();
     router.push("/dashboard");
   };
+
+  if (checking) return null;
 
   return (
     <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-blue-100 to-blue-300 p-4">

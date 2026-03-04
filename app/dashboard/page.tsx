@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
-import { createClient, getCachedSession, clearSessionCache } from "@/lib/supabase";
+import { createClient, getCachedSession, getSessionWithRetry, clearSessionCache } from "@/lib/supabase";
 import {
   getWorkspacesForUser,
   getBoardsByWorkspace,
@@ -521,10 +521,48 @@ export default function Dashboard() {
   );
   const [selectedWorkspaceForBoards, setSelectedWorkspaceForBoards] = useState<Workspace | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
+  const optimisticallyDeletedBoardIdsRef = useRef<Set<string>>(new Set());
+  const optimisticallyDeletedWorkspaceIdsRef = useRef<Set<string>>(new Set());
+  const creatingWorkspaceRef = useRef(false);
+
+  const refreshDashboard = async () => {
+    if (!authUserId) return;
+    const { data: ws, error: wsErr } = await getWorkspacesForUser(authUserId);
+    if (wsErr) {
+      setError(normalizeNetworkError(wsErr.message));
+      return;
+    }
+    const allBoards: BoardWithWorkspace[] = [];
+    for (const w of ws ?? []) {
+      const { data: b } = await getBoardsByWorkspace(w.id);
+      (b ?? []).forEach((board) =>
+        allBoards.push({ ...board, workspaceName: w.name }),
+      );
+    }
+    // Don't overwrite boards/workspaces we optimistically removed (delete may not have committed yet)
+    const deletedBoards = optimisticallyDeletedBoardIdsRef.current;
+    const deletedWorkspaces = optimisticallyDeletedWorkspaceIdsRef.current;
+    const filteredWs = deletedWorkspaces.size
+      ? (ws ?? []).filter((w) => !deletedWorkspaces.has(w.id))
+      : ws ?? [];
+    const filteredBoards =
+      deletedBoards.size || deletedWorkspaces.size
+        ? allBoards.filter(
+            (b) => !deletedBoards.has(b.id) && !deletedWorkspaces.has(b.workspace_id),
+          )
+        : allBoards;
+    setWorkspaces((prev) => {
+      const pending = prev.filter((w) => String(w.id).startsWith("temp-ws-"));
+      return pending.length ? [...filteredWs, ...pending] : filteredWs;
+    });
+    setBoards(filteredBoards);
+    setError(null);
+  };
 
   useEffect(() => {
     (async () => {
-      const session = await getCachedSession();
+      const session = await getSessionWithRetry(500);
       if (!session?.user) {
         router.replace("/login");
         return;
@@ -561,6 +599,56 @@ export default function Dashboard() {
     })();
   }, [router]);
 
+  // BroadcastChannel: sync across tabs when boards/workspaces change
+  useEffect(() => {
+    if (!authUserId) return;
+    broadcastChannelRef.current = new BroadcastChannel("register-dashboard");
+    const handler = (e: MessageEvent) => {
+      if (e.data?.type === "broadcast" && e.data?.event === "refresh") {
+        refreshDashboard();
+      }
+    };
+    broadcastChannelRef.current.addEventListener("message", handler);
+    return () => {
+      broadcastChannelRef.current?.removeEventListener("message", handler);
+      broadcastChannelRef.current?.close();
+    };
+  }, [authUserId]);
+
+  // Supabase Realtime: sync when boards/workspace change in DB (other devices)
+  useEffect(() => {
+    if (!authUserId) return;
+    const supabase = createClient();
+    const onRefresh = () => {
+      refreshDashboard();
+      broadcastChannelRef.current?.postMessage({ type: "broadcast", event: "refresh" });
+    };
+    const channel = supabase
+      .channel("dashboard-realtime")
+      .on("postgres_changes", { event: "*", schema: "public", table: "boards" }, onRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "workspace" }, onRefresh)
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [authUserId]);
+
+  // Polling fallback: refresh every 3s
+  useEffect(() => {
+    if (!authUserId) return;
+    let cancelled = false;
+    const poll = () => {
+      refreshDashboard().catch(() => {});
+    };
+    const id = setInterval(() => {
+      if (!cancelled) poll();
+    }, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [authUserId]);
+
   const handleSignOut = async () => {
     clearSessionCache();
     const supabase = createClient();
@@ -571,16 +659,32 @@ export default function Dashboard() {
   const handleCreateWorkspace = async () => {
     const name = addWorkspaceName.trim();
     if (!name || !authUserId) return;
+    if (creatingWorkspaceRef.current) return;
+    creatingWorkspaceRef.current = true;
     setError(null);
+    const tempId = `temp-ws-${Date.now()}`;
+    const optimistic: Workspace = {
+      id: tempId,
+      name,
+      created_at: new Date().toISOString(),
+    };
+    setWorkspaces((prev) => [optimistic, ...prev]);
+    setAddWorkspaceName("");
+    setShowCreateWorkspace(false);
+
     const { data, error: createErr } = await createWorkspace(name, authUserId);
+    creatingWorkspaceRef.current = false;
     if (createErr) {
       setError(normalizeNetworkError(createErr.message));
+      setWorkspaces((prev) => prev.filter((w) => w.id !== tempId));
       return;
     }
     if (data) {
-      setWorkspaces((prev) => [data, ...prev]);
-      setAddWorkspaceName("");
-      setShowCreateWorkspace(false);
+      setWorkspaces((prev) => [
+        data,
+        ...prev.filter((w) => w.id !== tempId && w.id !== data.id),
+      ]);
+      broadcastChannelRef.current?.postMessage({ type: "broadcast", event: "refresh" });
     }
   };
 
@@ -614,30 +718,42 @@ export default function Dashboard() {
         { ...data, workspaceName },
         ...prev.filter((b) => b.id !== tempId && b.id !== data.id),
       ]);
+      broadcastChannelRef.current?.postMessage({ type: "broadcast", event: "refresh" });
     }
   };
 
   const handleDeleteBoard = async (board: BoardWithWorkspace) => {
     if (!confirm(`Delete board "${board.name}"? This cannot be undone.`)) return;
     setError(null);
+    optimisticallyDeletedBoardIdsRef.current.add(board.id);
     setBoards((prev) => prev.filter((b) => b.id !== board.id));
 
     const { error: delErr } = await deleteBoard(board.id);
     if (delErr) {
       setError(normalizeNetworkError(delErr.message));
+      optimisticallyDeletedBoardIdsRef.current.delete(board.id);
       setBoards((prev) => [board, ...prev]);
+    } else {
+      optimisticallyDeletedBoardIdsRef.current.delete(board.id);
     }
   };
 
   const handleDeleteWorkspace = async (ws: Workspace) => {
     if (!confirm(`Delete workspace "${ws.name}"? This cannot be undone.`)) return;
     setError(null);
+    optimisticallyDeletedWorkspaceIdsRef.current.add(ws.id);
+    setWorkspaces((prev) => prev.filter((w) => w.id !== ws.id));
+    setBoards((prev) => prev.filter((b) => b.workspace_id !== ws.id));
+
     const { error: delErr } = await deleteWorkspace(ws.id);
     if (delErr) {
       setError(normalizeNetworkError(delErr.message));
+      optimisticallyDeletedWorkspaceIdsRef.current.delete(ws.id);
+      setWorkspaces((prev) => [...prev, ws].sort((a, b) => a.name.localeCompare(b.name)));
+      // Restore boards for this workspace - we'd need to refetch; simpler: just refresh
+      refreshDashboard();
     } else {
-      setWorkspaces((prev) => prev.filter((w) => w.id !== ws.id));
-      setBoards((prev) => prev.filter((b) => b.workspace_id !== ws.id));
+      optimisticallyDeletedWorkspaceIdsRef.current.delete(ws.id);
       if (selectedWorkspaceForMembers?.id === ws.id) {
         setShowMembersModal(false);
         setSelectedWorkspaceForMembers(null);
@@ -664,7 +780,13 @@ export default function Dashboard() {
             href="/dashboard"
             className="flex items-center justify-center shrink-0"
           >
-            <Image src="/logo.png" alt="Logo" width={40} height={40} className="w-10 h-10 object-contain" />
+            <Image
+              src="/Resolute Trello-03.png"
+              alt="Logo"
+              width={160}
+              height={40}
+              className="h-10 w-auto object-contain"
+            />
           </Link>
           <span className="text-white font-semibold text-lg tracking-tight">Workspaces</span>
         </div>

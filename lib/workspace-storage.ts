@@ -102,10 +102,12 @@ export async function deleteWorkspace(workspaceId: string): Promise<{ error: Err
     (rows ?? []).forEach((r: { cardid: number }) => cardIds.add(r.cardid));
   }
 
-  // Delete board placements and list order
+  // Delete board placements, list order, and empty column rows in cardslist
   for (const bid of boardIds) {
     await supabase.from("boardcards").delete().eq("boardname", bid);
     await supabase.from("board_list_order").delete().eq("boardname", bid);
+    await supabase.from("cardslist").delete().eq("board_id", bid).is("carditemid", null);
+    await supabase.from("cardslist").update({ board_id: null }).eq("board_id", bid);
   }
 
   // Delete orphaned cards and their items (only if card no longer on any board)
@@ -279,31 +281,45 @@ export async function createBoard(
   };
 }
 
-/** Delete a board and its boardcards, list order, and orphaned card data. */
+/** Delete a board and all its boardcards, list order, cards, items, comments, and activities. */
 export async function deleteBoard(boardId: string): Promise<{ error: Error | null }> {
   const supabase = createClient();
   const bid = String(boardId);
 
-  const { data: rows } = await supabase.from("boardcards").select("cardid").eq("boardname", bid);
-  const cardIds = new Set<number>((rows ?? []).map((r: { cardid: number }) => r.cardid));
+  // 1. Collect all card IDs and their item IDs BEFORE any deletes
+  const { data: bcRows } = await supabase.from("boardcards").select("cardid").eq("boardname", bid);
+  const { data: clRows } = await supabase.from("cardslist").select("id, carditemid").eq("board_id", bid);
+  const cardIds = new Set<number>([
+    ...(bcRows ?? []).map((r: { cardid: number }) => r.cardid),
+    ...(clRows ?? []).map((r: { id: number }) => r.id),
+  ]);
+  const itemIdsOnBoard = new Set<number>();
+  (clRows ?? []).forEach((r: { carditemid: number | null }) => {
+    if (r.carditemid != null) itemIdsOnBoard.add(r.carditemid);
+  });
 
+  // 2. Delete board–card links and list order
   await supabase.from("boardcards").delete().eq("boardname", bid);
   await supabase.from("board_list_order").delete().eq("boardname", bid);
 
+  // 3. Delete empty column rows and clear board_id on cards
+  await supabase.from("cardslist").delete().eq("board_id", bid).is("carditemid", null);
+  await supabase.from("cardslist").update({ board_id: null }).eq("board_id", bid);
+
+  // 4. Delete each card on this board
   for (const cardId of cardIds) {
     const { data: remaining } = await supabase.from("boardcards").select("id").eq("cardid", cardId).limit(1);
     if (remaining?.length) continue;
-    const { data: card } = await supabase.from("cardslist").select("carditemid").eq("id", cardId).maybeSingle();
-    const itemId = card?.carditemid as number | undefined;
     await supabase.from("cardslist").delete().eq("id", cardId);
-    if (itemId != null) {
-      const { data: otherCards } = await supabase.from("cardslist").select("id").eq("carditemid", itemId).limit(1);
-      if (!otherCards?.length) {
-        await supabase.from("item_comments").delete().eq("item_id", itemId);
-        await supabase.from("item_activities").delete().eq("item_id", itemId);
-        await supabase.from("itemslist").delete().eq("id", itemId);
-      }
-    }
+  }
+
+  // 5. For each item that was on this board, if no card references it anymore, delete comments, activities, and item
+  for (const itemId of itemIdsOnBoard) {
+    const { data: otherCards } = await supabase.from("cardslist").select("id").eq("carditemid", itemId).limit(1);
+    if (otherCards?.length) continue;
+    await supabase.from("item_comments").delete().eq("item_id", itemId);
+    await supabase.from("item_activities").delete().eq("item_id", itemId);
+    await supabase.from("itemslist").delete().eq("id", itemId);
   }
 
   const { error } = await supabase.from("boards").delete().eq("id", bid);
