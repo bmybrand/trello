@@ -775,7 +775,7 @@ export default function WorkspacePage() {
     setShowNewBoard(false);
     if (showBoardPopup) setShowBoardPopup(false);
 
-    const { data, error } = await createBoard(workspaceId, name, authUserId);
+    const { data, error } = await createBoard(workspaceId, name, authUserId ?? undefined);
     if (error) {
       setAddCardError(error.message);
       setBoards((prev) => prev.filter((b) => b.id !== tempId));

@@ -844,7 +844,7 @@ export default function Dashboard() {
     setAddBoardName("");
     setAddBoardWorkspaceId(null);
 
-    const { data, error: createErr } = await createBoard(workspaceId, name, authUserId);
+    const { data, error: createErr } = await createBoard(workspaceId, name, authUserId ?? undefined);
     if (createErr) {
       setError(normalizeNetworkError(createErr.message));
       setBoards((prev) => prev.filter((b) => b.id !== tempId));
