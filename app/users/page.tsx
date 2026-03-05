@@ -240,6 +240,7 @@ export default function UsersPage() {
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editingUser, setEditingUser] = useState<AppUser | null>(null);
+  const [expandedImageUrl, setExpandedImageUrl] = useState<string | null>(null);
 
   const loadUsers = useCallback(async () => {
     if (!authUserId || !isAdmin) return;
@@ -372,7 +373,14 @@ export default function UsersPage() {
                   <td className="p-4">
                     <div className="w-8 h-8 rounded-full overflow-hidden bg-navy-800 flex items-center justify-center shrink-0">
                       {u.profile_image ? (
-                        <img src={u.profile_image} alt="" className="w-full h-full object-cover" />
+                        <button
+                          type="button"
+                          onClick={() => setExpandedImageUrl(u.profile_image ?? null)}
+                          className="w-full h-full block focus:outline-none focus:ring-2 focus:ring-white/40 focus:ring-offset-2 focus:ring-offset-navy-900 rounded-full cursor-zoom-in"
+                          title="View full size"
+                        >
+                          <img src={u.profile_image} alt="" className="w-full h-full object-cover" />
+                        </button>
                       ) : (
                         <span className="text-white/40 text-xs font-medium">{(u.full_name ?? "?").charAt(0).toUpperCase()}</span>
                       )}
@@ -409,6 +417,35 @@ export default function UsersPage() {
           onClose={() => setEditingUser(null)}
           onSaved={() => loadUsers()}
         />
+      )}
+
+      {expandedImageUrl && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80"
+          onClick={() => setExpandedImageUrl(null)}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => e.key === "Escape" && setExpandedImageUrl(null)}
+          aria-label="Close expanded image"
+        >
+          <img
+            src={expandedImageUrl}
+            alt="Profile"
+            className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+          <button
+            type="button"
+            onClick={() => setExpandedImageUrl(null)}
+            className="absolute top-4 right-4 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white"
+            aria-label="Close"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M18 6 6 18" />
+              <path d="m6 6 12 12" />
+            </svg>
+          </button>
+        </div>
       )}
     </div>
   );
