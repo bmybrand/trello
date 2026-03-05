@@ -491,6 +491,7 @@ export type AppUser = {
   email: string | null;
   app_role: string | null;
   profile_image: string | null;
+  user_bg_image: string | null;
   created_at: string;
 };
 
@@ -505,7 +506,7 @@ export async function getAllUsers(requesterAuthId: string): Promise<{
   }
   const { data, error } = await supabase
     .from("users")
-    .select("id, auth_id, full_name, email, app_role, profile_image, created_at")
+    .select("id, auth_id, full_name, email, app_role, profile_image, user_bg_image, created_at")
     .order("created_at", { ascending: false });
   if (error) return { data: null, error };
   return { data: (data ?? []) as AppUser[], error: null };
@@ -514,7 +515,7 @@ export async function getAllUsers(requesterAuthId: string): Promise<{
 /** Update a user's full_name, email, app_role, or profile_image. Admin can update users (not other admins' roles); superadmin can change anyone. Only one superadmin; transferring it demotes the current superadmin to admin. */
 export async function updateUser(
   authId: string,
-  updates: { full_name?: string; email?: string; app_role?: string; profile_image?: string },
+  updates: { full_name?: string; email?: string; app_role?: string; profile_image?: string; user_bg_image?: string },
   requesterAuthId: string
 ): Promise<{ error: Error | null }> {
   const supabase = createClient();
@@ -536,6 +537,7 @@ export async function updateUser(
   if (updates.full_name !== undefined) payload.full_name = updates.full_name.trim();
   if (updates.email !== undefined) payload.email = updates.email.trim();
   if (updates.profile_image !== undefined) payload.profile_image = updates.profile_image;
+  if (updates.user_bg_image !== undefined) payload.user_bg_image = updates.user_bg_image;
 
   // Role change rules
   if (updates.app_role !== undefined) {
@@ -586,7 +588,7 @@ export async function getUserByAuthId(
   }
   const { data, error } = await supabase
     .from("users")
-    .select("id, auth_id, full_name, email, app_role, profile_image, created_at")
+    .select("id, auth_id, full_name, email, app_role, profile_image, user_bg_image, created_at")
     .eq("auth_id", authId)
     .single();
   if (error) return { data: null, error };

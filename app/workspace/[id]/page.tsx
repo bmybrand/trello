@@ -326,7 +326,7 @@ export default function WorkspacePage() {
   const params = useParams();
   const pathname = usePathname();
   const workspaceId = params.id as string;
-  const [user, setUser] = useState<{ email?: string; full_name?: string; profile_image?: string | null; app_role?: string | null } | null>(null);
+  const [user, setUser] = useState<{ email?: string; full_name?: string; profile_image?: string | null; app_role?: string | null; user_bg_image?: string | null } | null>(null);
   const [authUserId, setAuthUserId] = useState<string | null>(null);
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -380,11 +380,11 @@ export default function WorkspacePage() {
   const refetchUser = async () => {
     if (!authUserId) return;
     const supabase = createClient();
-    const { data: userRow } = await supabase.from("users").select("full_name, profile_image, app_role").eq("auth_id", authUserId).single();
-    const row = userRow as { full_name?: string; profile_image?: string | null; app_role?: string | null } | null;
+    const { data: userRow } = await supabase.from("users").select("full_name, profile_image, app_role, user_bg_image").eq("auth_id", authUserId).single();
+    const row = userRow as { full_name?: string; profile_image?: string | null; app_role?: string | null; user_bg_image?: string | null } | null;
     setUser((prev) =>
       prev
-        ? { ...prev, full_name: (row?.full_name as string) ?? prev.full_name, profile_image: row?.profile_image ?? null, app_role: row?.app_role ?? null }
+        ? { ...prev, full_name: (row?.full_name as string) ?? prev.full_name, profile_image: row?.profile_image ?? null, app_role: row?.app_role ?? null, user_bg_image: row?.user_bg_image ?? null }
         : prev
     );
   };
@@ -395,9 +395,9 @@ export default function WorkspacePage() {
       if (!session?.user) { router.replace("/login"); return; }
       const u = session.user;
       const supabase = createClient();
-      const { data: userRow } = await supabase.from("users").select("full_name, profile_image, app_role").eq("auth_id", u.id).single();
-      const row = userRow as { full_name?: string; profile_image?: string | null; app_role?: string | null } | null;
-      setUser({ email: u.email ?? undefined, full_name: (row?.full_name as string) ?? (u.user_metadata?.full_name as string) ?? undefined, profile_image: row?.profile_image ?? null, app_role: row?.app_role ?? null });
+      const { data: userRow } = await supabase.from("users").select("full_name, profile_image, app_role, user_bg_image").eq("auth_id", u.id).single();
+      const row = userRow as { full_name?: string; profile_image?: string | null; app_role?: string | null; user_bg_image?: string | null } | null;
+      setUser({ email: u.email ?? undefined, full_name: (row?.full_name as string) ?? (u.user_metadata?.full_name as string) ?? undefined, profile_image: row?.profile_image ?? null, app_role: row?.app_role ?? null, user_bg_image: row?.user_bg_image ?? null });
       setAuthUserId(u.id);
 
       const [wsRes, wsListRes, boardsRes, memberRes] = await Promise.all([
@@ -1102,7 +1102,21 @@ export default function WorkspacePage() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-gradient-to-br from-navy-950 via-navy-900/80 to-navy-950">
+    <div className="min-h-screen flex flex-col relative">
+      <div
+        className="fixed inset-0 z-0"
+        style={
+          user?.user_bg_image && String(user.user_bg_image).trim()
+            ? {
+                backgroundImage: `linear-gradient(to bottom right, rgba(10,24,46,0.92), rgba(15,32,56,0.88)), url(${user.user_bg_image})`,
+                backgroundSize: "cover",
+                backgroundPosition: "center",
+              }
+            : { background: "linear-gradient(to bottom right, rgb(10,24,46), rgba(15,32,56,0.95))" }
+        }
+        aria-hidden
+      />
+      <div className="relative z-10 flex flex-col min-h-screen">
       <header className="flex items-center justify-between px-6 py-3 bg-white/5 backdrop-blur-md border-b border-white/10 shrink-0">
         <div className="flex items-center gap-4">
           <Link href="/dashboard" className="flex items-center justify-center shrink-0">
@@ -1557,6 +1571,7 @@ export default function WorkspacePage() {
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }

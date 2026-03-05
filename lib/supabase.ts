@@ -189,6 +189,26 @@ export async function uploadProfileImage(
   return { url: `${publicUrl}?t=${Date.now()}`, error: null };
 }
 
+/** Upload a user background image. Path: {authUserId}/bg.{ext}. Stored in profiles bucket; used as dashboard/workspace background. */
+export async function uploadBackgroundImage(
+  file: File,
+  authUserId: string
+): Promise<{ url: string | null; error: Error | null }> {
+  const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
+  const allowed = ["jpg", "jpeg", "png", "gif", "webp"];
+  if (!allowed.includes(ext)) {
+    return { url: null, error: new Error("Allowed: jpg, png, gif, webp") };
+  }
+  const path = `${authUserId}/bg.${ext}`;
+  const supabase = createClient();
+  const { data, error } = await supabase.storage
+    .from(PROFILES_BUCKET)
+    .upload(path, file, { upsert: true });
+  if (error) return { url: null, error };
+  const { data: { publicUrl } } = supabase.storage.from(PROFILES_BUCKET).getPublicUrl(data.path);
+  return { url: `${publicUrl}?t=${Date.now()}`, error: null };
+}
+
 /** Upload a cover image to Supabase Storage. Requires a bucket named "covers" with public read access. */
 export async function uploadCoverImage(
   file: File

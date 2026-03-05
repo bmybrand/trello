@@ -9,7 +9,7 @@ function broadcastProfileUpdated() {
   } catch {}
 }
 import Link from "next/link";
-import { createClient, uploadProfileImage } from "@/lib/supabase";
+import { createClient, uploadProfileImage, uploadBackgroundImage } from "@/lib/supabase";
 import { getSessionWithRetry } from "@/lib/supabase";
 import { getUserByAuthId, updateUser, type AppUser } from "@/lib/workspace-storage";
 
@@ -23,7 +23,9 @@ export default function SettingsPage() {
   const [email, setEmail] = useState("");
   const [appRole, setAppRole] = useState("");
   const [profileImage, setProfileImage] = useState<string | null>(null);
+  const [bgImage, setBgImage] = useState<string | null>(null);
   const [newPassword, setNewPassword] = useState("");
+  const [uploadingBg, setUploadingBg] = useState(false);
   const [saving, setSaving] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -49,6 +51,7 @@ export default function SettingsPage() {
         setEmail(data.email ?? "");
         setAppRole(data.app_role ?? "");
         setProfileImage(data.profile_image && String(data.profile_image).trim() ? data.profile_image : null);
+        setBgImage(data.user_bg_image && String(data.user_bg_image).trim() ? data.user_bg_image : null);
       }
       setLoading(false);
     })();
@@ -83,6 +86,58 @@ export default function SettingsPage() {
     }
     setUploadingImage(false);
     e.target.value = "";
+  };
+
+  const bgInputRef = useRef<HTMLInputElement>(null);
+  const handleBgImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !authUserId) return;
+    setUploadingBg(true);
+    setError(null);
+    const { url, error: uploadErr } = await uploadBackgroundImage(file, authUserId);
+    if (uploadErr) {
+      setError(uploadErr.message);
+      setUploadingBg(false);
+      return;
+    }
+    if (url) {
+      const { error: updateErr } = await updateUser(
+        authUserId,
+        { user_bg_image: url },
+        authUserId
+      );
+      if (updateErr) {
+        setError(updateErr.message);
+      } else {
+        setBgImage(url);
+        setUser((prev) => (prev ? { ...prev, user_bg_image: url } : null));
+        setSuccess("Background image updated.");
+        broadcastProfileUpdated();
+        setTimeout(() => broadcastProfileUpdated(), 3000);
+      }
+    }
+    setUploadingBg(false);
+    e.target.value = "";
+  };
+
+  const handleRemoveBgImage = async () => {
+    if (!authUserId) return;
+    setUploadingBg(true);
+    setError(null);
+    const { error: updateErr } = await updateUser(
+      authUserId,
+      { user_bg_image: "" },
+      authUserId
+    );
+    if (updateErr) setError(updateErr.message);
+    else {
+      setBgImage(null);
+      setUser((prev) => (prev ? { ...prev, user_bg_image: null } : null));
+      setSuccess("Background image removed.");
+      broadcastProfileUpdated();
+      setTimeout(() => broadcastProfileUpdated(), 3000);
+    }
+    setUploadingBg(false);
   };
 
   const handleSave = async () => {
@@ -271,9 +326,61 @@ export default function SettingsPage() {
           <div>
             <label className="block text-white/60 text-sm mb-1">Role</label>
             <div className="w-full rounded-xl p-3 bg-navy-800/60 border border-navy-800 text-white/80 cursor-not-allowed">
-              {appRole === "admin" ? "Admin" : "User"}
+              {appRole === "superadmin" ? "Superadmin" : appRole === "admin" ? "Admin" : "User"}
             </div>
             <p className="text-white/40 text-xs mt-1">Only an admin can change your role.</p>
+          </div>
+          <div className="border-t border-white/10 pt-4">
+            <label className="block text-white/60 text-sm mb-1">Background image</label>
+            <p className="text-white/50 text-xs mb-2">Shown behind dashboard and workspace. Same for all pages.</p>
+            {bgImage ? (
+              <div className="relative rounded-xl overflow-hidden border border-white/10 bg-navy-900/50 aspect-video max-h-32">
+                <img src={bgImage} alt="Background" className="w-full h-full object-cover" />
+                <div className="absolute inset-0 flex items-center justify-center gap-2 bg-black/40 opacity-0 hover:opacity-100 transition">
+                  <input
+                    ref={bgInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/gif,image/webp"
+                    className="hidden"
+                    onChange={handleBgImageChange}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => bgInputRef.current?.click()}
+                    disabled={uploadingBg}
+                    className="px-3 py-1.5 rounded-lg bg-navy-700 text-white text-sm hover:bg-navy-600 disabled:opacity-60"
+                  >
+                    {uploadingBg ? "…" : "Change"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleRemoveBgImage}
+                    disabled={uploadingBg}
+                    className="px-3 py-1.5 rounded-lg bg-red-500/80 text-white text-sm hover:bg-red-500 disabled:opacity-60"
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <input
+                  ref={bgInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/gif,image/webp"
+                  className="hidden"
+                  onChange={handleBgImageChange}
+                />
+                <button
+                  type="button"
+                  onClick={() => bgInputRef.current?.click()}
+                  disabled={uploadingBg}
+                  className="w-full rounded-xl p-4 border-2 border-dashed border-navy-700 text-white/60 hover:border-navy-600 hover:text-white/80 transition disabled:opacity-60"
+                >
+                  {uploadingBg ? "Uploading…" : "Upload background image"}
+                </button>
+              </div>
+            )}
           </div>
           <div>
             <label className="block text-white/60 text-sm mb-1">New password (optional)</label>

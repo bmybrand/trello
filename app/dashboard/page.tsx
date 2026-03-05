@@ -326,7 +326,17 @@ function Sidebar({
         ))}
       </nav>
       <div className="p-3 border-t border-white/10 shrink-0 space-y-2">
-        {isAdmin ? (
+        <Link
+          href="/settings"
+          className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white/80 hover:text-white transition-colors"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          </svg>
+          <span className="text-sm font-medium">Settings</span>
+        </Link>
+        {isAdmin && (
           <>
             <Link
               href="/users"
@@ -349,17 +359,6 @@ function Sidebar({
               <span className="text-sm font-medium">Add new user</span>
             </button>
           </>
-        ) : (
-          <Link
-            href="/settings"
-            className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white/80 hover:text-white transition-colors"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="3" />
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-            </svg>
-            <span className="text-sm font-medium">Settings</span>
-          </Link>
         )}
       </div>
     </aside>
@@ -791,7 +790,7 @@ function CollaboratorsModal({
 export default function Dashboard() {
   const router = useRouter();
   const pathname = usePathname();
-  const [user, setUser] = useState<{ email?: string; full_name?: string; profile_image?: string | null; app_role?: string | null } | null>(null);
+  const [user, setUser] = useState<{ email?: string; full_name?: string; profile_image?: string | null; app_role?: string | null; user_bg_image?: string | null } | null>(null);
   const [authUserId, setAuthUserId] = useState<string | null>(null);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [boards, setBoards] = useState<BoardWithWorkspace[]>([]);
@@ -870,16 +869,17 @@ export default function Dashboard() {
       const supabase = createClient();
       const { data: userRow } = await supabase
         .from("users")
-        .select("full_name, profile_image, app_role")
+        .select("full_name, profile_image, app_role, user_bg_image")
         .eq("auth_id", u.id)
         .single();
-      const row = userRow as { full_name?: string; profile_image?: string | null; app_role?: string | null } | null;
+      const row = userRow as { full_name?: string; profile_image?: string | null; app_role?: string | null; user_bg_image?: string | null } | null;
       setUser({
         email: u.email ?? undefined,
         full_name:
           (row?.full_name as string) ?? (u.user_metadata?.full_name as string) ?? undefined,
         profile_image: row?.profile_image ?? null,
         app_role: row?.app_role ?? null,
+        user_bg_image: row?.user_bg_image ?? null,
       });
       setAuthUserId(u.id);
 
@@ -906,10 +906,10 @@ export default function Dashboard() {
     const supabase = createClient();
     const { data: userRow } = await supabase
       .from("users")
-      .select("full_name, profile_image, app_role")
+      .select("full_name, profile_image, app_role, user_bg_image")
       .eq("auth_id", authUserId)
       .single();
-    const row = userRow as { full_name?: string; profile_image?: string | null; app_role?: string | null } | null;
+    const row = userRow as { full_name?: string; profile_image?: string | null; app_role?: string | null; user_bg_image?: string | null } | null;
     setUser((prev) =>
       prev
         ? {
@@ -917,6 +917,7 @@ export default function Dashboard() {
             full_name: (row?.full_name as string) ?? prev.full_name,
             profile_image: row?.profile_image ?? null,
             app_role: row?.app_role ?? null,
+            user_bg_image: row?.user_bg_image ?? null,
           }
         : prev
     );
@@ -1126,7 +1127,22 @@ export default function Dashboard() {
   }
 
     return (
-    <div className="min-h-screen flex flex-col bg-gradient-to-br from-navy-950 via-navy-900/80 to-navy-950">
+    <div className="min-h-screen flex flex-col relative">
+      {/* User background image (same for dashboard & workspaces) */}
+      <div
+        className="fixed inset-0 z-0"
+        style={
+          user?.user_bg_image && String(user.user_bg_image).trim()
+            ? {
+                backgroundImage: `linear-gradient(to bottom right, rgba(10,24,46,0.92), rgba(15,32,56,0.88)), url(${user.user_bg_image})`,
+                backgroundSize: "cover",
+                backgroundPosition: "center",
+              }
+            : { background: "linear-gradient(to bottom right, rgb(10,24,46), rgba(15,32,56,0.95))" }
+        }
+        aria-hidden
+      />
+      <div className="relative z-10 flex flex-col min-h-screen">
       <header className="flex items-center justify-between px-6 py-3 bg-white/5 backdrop-blur-md border-b border-white/10 shrink-0">
         <div className="flex items-center gap-4">
           <Link
@@ -1630,6 +1646,7 @@ export default function Dashboard() {
           }}
         />
       )}
+      </div>
     </div>
   );
 }
