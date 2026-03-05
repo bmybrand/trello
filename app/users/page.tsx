@@ -74,6 +74,25 @@ function EditUserModal({
       setError(err.message);
       return;
     }
+    // Sync auth.users metadata so raw_user_meta_data / user_metadata stays in sync with public.users
+    const metaRes = await fetch("/api/admin/update-user-metadata", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        authId: user.auth_id,
+        full_name: fullName.trim(),
+        email: email.trim(),
+      }),
+    });
+    if (!metaRes.ok) {
+      const data = await metaRes.json().catch(() => ({}));
+      setLoading(false);
+      setError(data.error ?? "Profile saved but auth metadata sync failed");
+      return;
+    }
     if (newPassword.trim().length >= 6) {
       const res = await fetch("/api/admin/update-password", {
         method: "POST",
