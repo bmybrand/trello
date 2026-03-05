@@ -4,6 +4,7 @@ export type Workspace = {
   id: string;
   name: string;
   created_at: string;
+  boardid?: string | null;
 };
 
 export type WorkspaceMember = {
@@ -20,6 +21,7 @@ export type Board = {
   name: string;
   workspace_id: string;
   created_at: string;
+  cardid?: string | null;
 };
 
 export type BoardMember = {
@@ -47,11 +49,17 @@ export async function getWorkspacesForUser(userId: string): Promise<{
   if (workspaceIds.length === 0) return { data: [], error: null };
   const { data: workspaces, error } = await supabase
     .from("workspace")
-    .select("id, name, created_at")
+    .select("id, name, created_at, boardid")
     .in("id", workspaceIds)
     .order("created_at", { ascending: false });
   if (error) return { data: null, error };
-  return { data: (workspaces ?? []) as Workspace[], error: null };
+  const list = (workspaces ?? []).map((w: { id: string; name: string; created_at: string; boardid?: string | null }) => ({
+    id: String(w.id),
+    name: w.name,
+    created_at: w.created_at,
+    boardid: w.boardid != null ? String(w.boardid) : null,
+  }));
+  return { data: list, error: null };
 }
 
 /** Get a single workspace by id. */
@@ -62,14 +70,15 @@ export async function getWorkspace(workspaceId: string): Promise<{
   const supabase = createClient();
   const { data, error } = await supabase
     .from("workspace")
-    .select("id, name, created_at")
+    .select("id, name, created_at, boardid")
     .eq("id", workspaceId)
     .single();
   if (error) return { data: null, error };
-  return { data: data as Workspace, error: null };
+  const w = data as { id: string; name: string; created_at: string; boardid?: string | null };
+  return { data: { id: String(w.id), name: w.name, created_at: w.created_at, boardid: w.boardid != null ? String(w.boardid) : null }, error: null };
 }
 
-/** Create a workspace and add the creator as a member. Only users with app_role 'admin' can create. */
+/** Create a workspace and add the creator as a member. Creates one board for the workspace and links workspace.boardid = board.id. Only users with app_role 'admin' can create. */
 export async function createWorkspace(
   name: string,
   creatorUserId: string
@@ -78,15 +87,40 @@ export async function createWorkspace(
   if (!(await isAdmin(supabase, creatorUserId))) {
     return { data: null, error: new Error("Only the admin can create workspaces.") };
   }
-  const { data: created, error: workspaceError } = await supabase
-    .from("workspace")
+  // Create board first (cardid = board id, used as theme id in cardslist)
+  const { data: boardRow, error: boardError } = await supabase
+    .from("boards")
     .insert({
       name: name.trim(),
       created_at: new Date().toISOString(),
     })
     .select("id, name, created_at")
     .single();
-  if (workspaceError) return { data: null, error: workspaceError };
+  if (boardError) return { data: null, error: boardError };
+  const boardIdNum = boardRow?.id as number;
+  const boardId = String(boardIdNum);
+  // One cardslist row so cardthemid exists for FK; then set board.cardid = board.id
+  await supabase.from("cardslist").insert({
+    cardthemid: boardIdNum,
+    cardname: "To Do",
+    position: 0,
+  });
+  await supabase.from("boards").update({ cardid: boardIdNum }).eq("id", boardIdNum);
+  // Create workspace linked to this board
+  const { data: created, error: workspaceError } = await supabase
+    .from("workspace")
+    .insert({
+      name: name.trim(),
+      created_at: new Date().toISOString(),
+      boardid: boardId,
+    })
+    .select("id, name, created_at, boardid")
+    .single();
+  if (workspaceError) {
+    await supabase.from("cardslist").delete().eq("cardthemid", boardIdNum);
+    await supabase.from("boards").delete().eq("id", boardIdNum);
+    return { data: null, error: workspaceError };
+  }
   const id = String(created?.id ?? "");
   const { error: memberError } = await supabase.from("workspace_members").insert({
     workspace_id: id,
@@ -95,10 +129,24 @@ export async function createWorkspace(
   });
   if (memberError) {
     await supabase.from("workspace").delete().eq("id", id);
+    await supabase.from("cardslist").delete().eq("cardthemid", boardIdNum);
+    await supabase.from("boards").delete().eq("id", boardIdNum);
     return { data: null, error: memberError };
   }
+  const { data: adminRows } = await supabase.from("users").select("auth_id").in("app_role", ["admin", "superadmin"]);
+  const adminAuthIds = new Set((adminRows ?? []).map((r: { auth_id: string }) => r.auth_id));
+  const toAdd = new Set<string>(adminAuthIds);
+  toAdd.add(creatorUserId);
+  for (const uid of toAdd) {
+    await supabase.from("board_members").insert({
+      board_id: boardId,
+      user_id: uid,
+      role: adminAuthIds.has(uid) ? "admin" : "member",
+      created_at: new Date().toISOString(),
+    });
+  }
   return {
-    data: { id, name: (created?.name as string) ?? name.trim(), created_at: (created?.created_at as string) ?? new Date().toISOString() },
+    data: { id, name: (created?.name as string) ?? name.trim(), created_at: (created?.created_at as string) ?? new Date().toISOString(), boardid: boardId },
     error: null,
   };
 }
@@ -117,39 +165,32 @@ export async function isSuperAdmin(supabase: ReturnType<typeof createClient>, au
   return role === "superadmin";
 }
 
-/** Delete a workspace and all related data (boards, members, board cards, list order, cards, items, comments, activities). Only admin can delete. */
+/** Delete a workspace and its single board (workspace.boardid), cardslist by cardthemid, list order, items, comments, activities. Only admin can delete. */
 export async function deleteWorkspace(workspaceId: string, requesterAuthId: string): Promise<{ error: Error | null }> {
   const supabase = createClient();
   if (!(await isAdmin(supabase, requesterAuthId))) {
     return { error: new Error("Only the admin can delete workspaces.") };
   }
-  const { data: boards } = await getBoardsByWorkspace(workspaceId);
-  const boardIds = (boards ?? []).map((b) => String(b.id));
-
-  // Collect all card ids on these boards before deleting
-  const cardIds = new Set<number>();
-  for (const bid of boardIds) {
-    const { data: rows } = await supabase.from("boardcards").select("cardid").eq("boardname", bid);
-    (rows ?? []).forEach((r: { cardid: number }) => cardIds.add(r.cardid));
+  const { data: ws } = await supabase.from("workspace").select("boardid").eq("id", workspaceId).single();
+  const boardId = ws?.boardid != null ? String(ws.boardid) : null;
+  if (!boardId) {
+    await supabase.from("workspace_members").delete().eq("workspace_id", workspaceId);
+    const { error } = await supabase.from("workspace").delete().eq("id", workspaceId);
+    return { error };
   }
 
-  // Delete board members, placements, list order, and empty column rows
-  for (const bid of boardIds) {
-    await supabase.from("board_members").delete().eq("board_id", bid);
-    await supabase.from("boardcards").delete().eq("boardname", bid);
-    await supabase.from("board_list_order").delete().eq("boardname", bid);
-    await supabase.from("cardslist").delete().eq("board_id", bid).is("carditemid", null);
-    await supabase.from("cardslist").update({ board_id: null }).eq("board_id", bid);
-  }
+  const { data: boardRow } = await supabase.from("boards").select("cardid").eq("id", boardId).single();
+  const cardthemid = boardRow?.cardid != null ? Number(boardRow.cardid) : null;
 
-  // Delete orphaned cards and their items (only if card no longer on any board)
-  for (const cardId of cardIds) {
-    const { data: remaining } = await supabase.from("boardcards").select("id").eq("cardid", cardId).limit(1);
-    if (remaining?.length) continue;
-    const { data: card } = await supabase.from("cardslist").select("carditemid").eq("id", cardId).maybeSingle();
-    const itemId = card?.carditemid as number | undefined;
-    await supabase.from("cardslist").delete().eq("id", cardId);
-    if (itemId != null) {
+  if (cardthemid != null) {
+    const { data: clRows } = await supabase.from("cardslist").select("id, carditemid").eq("cardthemid", cardthemid);
+    const itemIds = new Set<number>();
+    (clRows ?? []).forEach((r: { carditemid: number | null }) => {
+      if (r.carditemid != null) itemIds.add(r.carditemid);
+    });
+    await supabase.from("board_list_order").delete().eq("boardname", boardId);
+    await supabase.from("cardslist").delete().eq("cardthemid", cardthemid);
+    for (const itemId of itemIds) {
       const { data: otherCards } = await supabase.from("cardslist").select("id").eq("carditemid", itemId).limit(1);
       if (!otherCards?.length) {
         await supabase.from("item_comments").delete().eq("item_id", itemId);
@@ -159,7 +200,8 @@ export async function deleteWorkspace(workspaceId: string, requesterAuthId: stri
     }
   }
 
-  await supabase.from("boards").delete().eq("workspace_id", workspaceId);
+  await supabase.from("board_members").delete().eq("board_id", boardId);
+  await supabase.from("boards").delete().eq("id", boardId);
   await supabase.from("workspace_members").delete().eq("workspace_id", workspaceId);
   const { error } = await supabase.from("workspace").delete().eq("id", workspaceId);
   return { error };
@@ -281,19 +323,37 @@ export async function removeWorkspaceMember(
   return { error };
 }
 
-/** Get boards in a workspace (all boards, no access filter). */
+/** Get boards in a workspace (one board per workspace via workspace.boardid). */
 export async function getBoardsByWorkspace(workspaceId: string): Promise<{
   data: Board[] | null;
   error: Error | null;
 }> {
   const supabase = createClient();
-  const { data, error } = await supabase
+  const { data: ws, error: wsErr } = await supabase
+    .from("workspace")
+    .select("id, boardid")
+    .eq("id", workspaceId)
+    .single();
+  if (wsErr || !ws?.boardid) return { data: [], error: wsErr };
+  const boardId = String(ws.boardid);
+  const { data: board, error } = await supabase
     .from("boards")
-    .select("id, name, workspace_id, created_at")
-    .eq("workspace_id", workspaceId)
-    .order("created_at", { ascending: true });
+    .select("id, name, created_at, cardid")
+    .eq("id", boardId)
+    .single();
   if (error) return { data: null, error };
-  return { data: (data ?? []) as Board[], error: null };
+  if (!board) return { data: [], error: null };
+  const b = board as { id: number; name: string; created_at: string; cardid?: number | null };
+  return {
+    data: [{
+      id: String(b.id),
+      name: b.name,
+      workspace_id: workspaceId,
+      created_at: b.created_at,
+      cardid: b.cardid != null ? String(b.cardid) : null,
+    }],
+    error: null,
+  };
 }
 
 /** Get boards accessible to a user in a workspace. If a board has no board_members, all workspace members see it. If it has board_members, only those users see it. */
@@ -394,92 +454,77 @@ export async function removeBoardMember(
   return { error };
 }
 
-/** Create a board in a workspace. Admin is automatically added to board_members and cannot be removed. Creator is also added. */
+/** Create a board (and optionally link to a new workspace). In the current schema one workspace has one board; use createWorkspace to create workspace+board. This is for backwards compatibility or direct board creation. */
 export async function createBoard(
   workspaceId: string,
   name: string,
   creatorUserId?: string
 ): Promise<{ data: Board | null; error: Error | null }> {
   const supabase = createClient();
-  const { data: created, error } = await supabase
+  const { data: boardRow, error: boardError } = await supabase
     .from("boards")
     .insert({
       name: name.trim(),
-      workspace_id: workspaceId,
       created_at: new Date().toISOString(),
     })
-    .select("id, name, workspace_id, created_at")
+    .select("id, name, created_at")
     .single();
-  if (error) return { data: null, error };
-  if (created?.id) {
-    const bid = String(created.id);
-    const { data: adminRows } = await supabase
-      .from("users")
-      .select("auth_id")
-      .in("app_role", ["admin", "superadmin"]);
-    const adminAuthIds = new Set((adminRows ?? []).map((r: { auth_id: string }) => r.auth_id));
-    const toAdd = new Set<string>(adminAuthIds);
-    if (creatorUserId) toAdd.add(creatorUserId);
-    for (const uid of toAdd) {
-      await supabase.from("board_members").insert({
-        board_id: bid,
-        user_id: uid,
-        role: adminAuthIds.has(uid) ? "admin" : "member",
-        created_at: new Date().toISOString(),
-      });
-    }
+  if (boardError) return { data: null, error: boardError };
+  const boardIdNum = boardRow?.id as number;
+  const boardId = String(boardIdNum);
+  await supabase.from("cardslist").insert({
+    cardthemid: boardIdNum,
+    cardname: "To Do",
+    position: 0,
+  });
+  await supabase.from("boards").update({ cardid: boardIdNum }).eq("id", boardIdNum);
+  const { data: adminRows } = await supabase.from("users").select("auth_id").in("app_role", ["admin", "superadmin"]);
+  const adminAuthIds = new Set((adminRows ?? []).map((r: { auth_id: string }) => r.auth_id));
+  const toAdd = new Set<string>(adminAuthIds);
+  if (creatorUserId) toAdd.add(creatorUserId);
+  for (const uid of toAdd) {
+    await supabase.from("board_members").insert({
+      board_id: boardId,
+      user_id: uid,
+      role: adminAuthIds.has(uid) ? "admin" : "member",
+      created_at: new Date().toISOString(),
+    });
   }
   return {
-    data: (created ?? null) as unknown as Board | null,
+    data: { id: boardId, name: (boardRow?.name as string) ?? name.trim(), workspace_id: workspaceId, created_at: (boardRow?.created_at as string) ?? new Date().toISOString(), cardid: boardId },
     error: null,
   };
 }
 
-/** Delete a board and all its boardcards, list order, cards, items, comments, and activities. Only admin can delete. */
+/** Delete a board and its cardslist (by cardthemid), list order, items, comments, and activities. Only admin can delete. */
 export async function deleteBoard(boardId: string, requesterAuthId: string): Promise<{ error: Error | null }> {
   const supabase = createClient();
   if (!(await isAdmin(supabase, requesterAuthId))) {
     return { error: new Error("Only the admin can delete boards.") };
   }
   const bid = String(boardId);
+  const { data: boardRow } = await supabase.from("boards").select("cardid").eq("id", bid).single();
+  const cardthemid = boardRow?.cardid != null ? Number(boardRow.cardid) : null;
 
-  // 1. Collect all card IDs and their item IDs BEFORE any deletes
-  const { data: bcRows } = await supabase.from("boardcards").select("cardid").eq("boardname", bid);
-  const { data: clRows } = await supabase.from("cardslist").select("id, carditemid").eq("board_id", bid);
-  const cardIds = new Set<number>([
-    ...(bcRows ?? []).map((r: { cardid: number }) => r.cardid),
-    ...(clRows ?? []).map((r: { id: number }) => r.id),
-  ]);
-  const itemIdsOnBoard = new Set<number>();
-  (clRows ?? []).forEach((r: { carditemid: number | null }) => {
-    if (r.carditemid != null) itemIdsOnBoard.add(r.carditemid);
-  });
+  if (cardthemid != null) {
+    const { data: clRows } = await supabase.from("cardslist").select("id, carditemid").eq("cardthemid", cardthemid);
+    const itemIds = new Set<number>();
+    (clRows ?? []).forEach((r: { carditemid: number | null }) => {
+      if (r.carditemid != null) itemIds.add(r.carditemid);
+    });
+    await supabase.from("board_list_order").delete().eq("boardname", bid);
+    await supabase.from("cardslist").delete().eq("cardthemid", cardthemid);
+    for (const itemId of itemIds) {
+      const { data: otherCards } = await supabase.from("cardslist").select("id").eq("carditemid", itemId).limit(1);
+      if (!otherCards?.length) {
+        await supabase.from("item_comments").delete().eq("item_id", itemId);
+        await supabase.from("item_activities").delete().eq("item_id", itemId);
+        await supabase.from("itemslist").delete().eq("id", itemId);
+      }
+    }
+  }
 
-  // 2. Delete board members, board–card links, and list order
   await supabase.from("board_members").delete().eq("board_id", bid);
-  await supabase.from("boardcards").delete().eq("boardname", bid);
-  await supabase.from("board_list_order").delete().eq("boardname", bid);
-
-  // 3. Delete empty column rows and clear board_id on cards
-  await supabase.from("cardslist").delete().eq("board_id", bid).is("carditemid", null);
-  await supabase.from("cardslist").update({ board_id: null }).eq("board_id", bid);
-
-  // 4. Delete each card on this board
-  for (const cardId of cardIds) {
-    const { data: remaining } = await supabase.from("boardcards").select("id").eq("cardid", cardId).limit(1);
-    if (remaining?.length) continue;
-    await supabase.from("cardslist").delete().eq("id", cardId);
-  }
-
-  // 5. For each item that was on this board, if no card references it anymore, delete comments, activities, and item
-  for (const itemId of itemIdsOnBoard) {
-    const { data: otherCards } = await supabase.from("cardslist").select("id").eq("carditemid", itemId).limit(1);
-    if (otherCards?.length) continue;
-    await supabase.from("item_comments").delete().eq("item_id", itemId);
-    await supabase.from("item_activities").delete().eq("item_id", itemId);
-    await supabase.from("itemslist").delete().eq("id", itemId);
-  }
-
   const { error } = await supabase.from("boards").delete().eq("id", bid);
   return { error };
 }

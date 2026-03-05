@@ -20,7 +20,6 @@ import {
   getBoardCards,
   getBoardListOrder,
   createCardWithItem,
-  addCardToBoard,
   updateCardList,
   updateCardPosition,
   updateBoardListOrder,
@@ -551,20 +550,16 @@ export default function WorkspacePage() {
     return () => { broadcastChannelRef.current?.close(); };
   }, [workspaceId, authUserId, currentBoardId]);
 
-  // Realtime updates across different browsers/devices
+  // Realtime updates across different browsers/devices (cardslist by cardthemid = board.cardid; no boardcards)
   useEffect(() => {
-    if (!currentBoardId) return;
+    if (!currentBoardId || !currentBoard?.cardid) return;
     const supabase = createClient();
+    const cardthemid = currentBoard.cardid;
     const channel = supabase
       .channel(`board-realtime-${currentBoardId}`)
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "boardcards", filter: `boardname=eq.${currentBoardId}` },
-        () => broadcastRefresh()
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "cardslist" },
+        { event: "*", schema: "public", table: "cardslist", filter: `cardthemid=eq.${cardthemid}` },
         () => broadcastRefresh()
       )
       .on(
@@ -582,7 +577,7 @@ export default function WorkspacePage() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [currentBoardId]);
+  }, [currentBoardId, currentBoard?.cardid]);
 
   // Periodically sync current board from database so other tabs/devices see changes without refresh
   useEffect(() => {
@@ -668,14 +663,12 @@ export default function WorkspacePage() {
     setAddCardError(null);
     const list = lists.find((l) => l.id === listId);
     const listName = list?.title ?? "To Do";
-    const { data, error } = await createCardWithItem(title, listName);
+    const { data, error } = await createCardWithItem(title, listName, "", currentBoard.id);
     if (error) { setAddCardError(error.message); return; }
     if (!data) return;
-    const { data: bcId, error: boardErr } = await addCardToBoard(data.cardId, currentBoard.id, listName);
-    if (boardErr) { setAddCardError(boardErr.message); return; }
     setLists((prev) =>
       prev.map((l) =>
-        l.id === listId ? { ...l, cards: [...l.cards, { id: `c-${data.cardId}`, title, dbCardId: data.cardId, boardCardId: bcId ?? undefined, itemId: data.itemId, done: false, coverUrl: null }] } : l
+        l.id === listId ? { ...l, cards: [...l.cards, { id: `c-${data.cardId}`, title, dbCardId: data.cardId, boardCardId: data.cardId, itemId: data.itemId, done: false, coverUrl: null }] } : l
       )
     );
     setNewCardTitle("");
