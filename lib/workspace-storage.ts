@@ -1,4 +1,4 @@
-import { createClient } from "./supabase";
+import { createClient, clearSessionCache } from "./supabase";
 
 export type Workspace = {
   id: string;
@@ -617,7 +617,21 @@ export async function updateUser(
 
   if (Object.keys(payload).length === 0) return { error: null };
   const { error } = await supabase.from("users").update(payload).eq("auth_id", authId);
-  return { error };
+  if (error) return { error };
+
+  // Sync auth.users raw_user_meta_data when updating own profile so session.user.user_metadata stays in sync
+  if (isSelf) {
+    const authData: Record<string, string> = {};
+    if (updates.full_name !== undefined) authData.full_name = updates.full_name.trim();
+    if (updates.profile_image !== undefined) authData.avatar_url = updates.profile_image;
+    if (Object.keys(authData).length > 0) {
+      const { error: authErr } = await supabase.auth.updateUser({ data: authData });
+      if (authErr) return { error: authErr };
+      clearSessionCache();
+    }
+  }
+
+  return { error: null };
 }
 
 /** Get a single user by auth_id. Users can fetch their own; admin can fetch any. */
