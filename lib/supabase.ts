@@ -1,7 +1,7 @@
 import { createClient as createSupabaseClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Session } from "@supabase/supabase-js";
 
-const SESSION_CACHE_MS = 1_800_000; // 15 min - avoid auth API rate limit
+const SESSION_CACHE_MS = 3_600_000; // 1 hour - avoid auth API rate limit; was 15 min, data "disappeared" when cache expired and RLS returned empty
 const RATE_LIMIT_BACKOFF_MS = 3_600_000; // 30 min backoff after rate limit
 
 let sessionCache: { session: Session | null; timestamp: number } | null = null;

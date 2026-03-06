@@ -34,6 +34,7 @@ import {
   createEmptyColumnInCardslist,
   updateEmptyColumnInCardslist,
   deleteEmptyColumnFromCardslist,
+  deleteColumnFromCardslist,
   updateEmptyColumnPositionsInCardslist,
 } from "@/lib/cards-storage";
 import {
@@ -415,6 +416,11 @@ export default function WorkspacePage() {
       setWorkspaces(wsListRes.data ?? []);
       setBoards(boardsRes.data ?? []);
       setIsMember(memberRes);
+      if (!memberRes) {
+        router.replace("/dashboard");
+        setLoading(false);
+        return;
+      }
 
       const firstBoard = (boardsRes.data ?? [])[0];
       if (firstBoard) {
@@ -550,16 +556,15 @@ export default function WorkspacePage() {
     return () => { broadcastChannelRef.current?.close(); };
   }, [workspaceId, authUserId, currentBoardId]);
 
-  // Realtime updates across different browsers/devices (cardslist by cardthemid = board.cardid; no boardcards)
+  // Realtime updates (cardslist by boardid)
   useEffect(() => {
-    if (!currentBoardId || !currentBoard?.cardid) return;
+    if (!currentBoardId) return;
     const supabase = createClient();
-    const cardthemid = currentBoard.cardid;
     const channel = supabase
       .channel(`board-realtime-${currentBoardId}`)
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "cardslist", filter: `cardthemid=eq.${cardthemid}` },
+        { event: "*", schema: "public", table: "cardslist", filter: `boardid=eq.${currentBoardId}` },
         () => broadcastRefresh()
       )
       .on(
@@ -577,7 +582,7 @@ export default function WorkspacePage() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [currentBoardId, currentBoard?.cardid]);
+  }, [currentBoardId]);
 
   // Periodically sync current board from database so other tabs/devices see changes without refresh
   useEffect(() => {
@@ -763,7 +768,7 @@ export default function WorkspacePage() {
     if (listId !== targetListId && dbCardId != null && targetList.title) {
       const fromList = sourceList.title;
       const toList = targetList.title;
-      updateCardList(dbCardId, targetList.title).then(({ error }) => {
+      updateCardList(dbCardId, currentBoardId, targetList.title).then(({ error }) => {
         if (error) { setAddCardError(error.message); setBoardData({ ...boardData, [currentBoardId]: prevState }); }
         else {
           updateCardPosition(dbCardId, insertIndex).then(() => {
@@ -998,7 +1003,7 @@ export default function WorkspacePage() {
       ...(target
         ? target.cards
             .filter((c) => c.dbCardId != null)
-            .map((c) => updateCardList(c.dbCardId!, name))
+            .map((c) => updateCardList(c.dbCardId!, currentBoardId, name))
         : []),
     ]).then(([orderResult]) => {
       const orderErr = (orderResult as { error: Error | null }).error;
@@ -1019,23 +1024,11 @@ export default function WorkspacePage() {
     setAddCardError(null);
 
     const prevLists = lists;
-    // Optimistic remove from UI
     setLists((prev) => prev.filter((l) => l.id !== listId));
-
-    // Delete all cards (and their items) in this list
-    const deletePromises = target.cards
-      .filter((c) => c.dbCardId != null)
-      .map((c) => deleteCardAndItem(c.dbCardId!));
-
     const remainingLists = prevLists.filter((l) => l.id !== listId);
 
     try {
-      const results = await Promise.all(deletePromises);
-      const firstErr = results.find((r) => r.error);
-      if (firstErr?.error) {
-        throw firstErr.error;
-      }
-      const { error: colErr } = await deleteEmptyColumnFromCardslist(currentBoardId, target.title);
+      const { error: colErr } = await deleteColumnFromCardslist(currentBoardId, target.title);
       if (colErr) throw colErr;
       const { error: orderErr } = await updateBoardListOrder(
         currentBoardId,
@@ -1046,7 +1039,6 @@ export default function WorkspacePage() {
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to delete list";
       setAddCardError(msg);
-      // revert UI
       setBoardData((prev) => ({ ...prev, [currentBoardId]: prevLists }));
     }
   };

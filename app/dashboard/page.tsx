@@ -838,6 +838,16 @@ export default function Dashboard() {
         allBoards.push({ ...board, workspaceName: w.name }),
       );
     }
+    // If we got empty data, session may have expired (RLS returns no rows). Re-validate before overwriting so data doesn't "disappear".
+    const hasEmptyResult = !(ws ?? []).length && !allBoards.length;
+    if (hasEmptyResult) {
+      const session = await getSessionWithRetry(0);
+      if (!session?.user) {
+        clearSessionCache();
+        router.replace("/login");
+        return;
+      }
+    }
     // Don't overwrite boards/workspaces we optimistically removed (delete may not have committed yet)
     const deletedBoards = optimisticallyDeletedBoardIdsRef.current;
     const deletedWorkspaces = optimisticallyDeletedWorkspaceIdsRef.current;
@@ -925,7 +935,10 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (!authUserId) return;
-    const onVisible = () => refetchUser();
+    const onVisible = () => {
+      refetchUser();
+      refreshDashboard();
+    };
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, [authUserId]);
@@ -962,7 +975,7 @@ export default function Dashboard() {
     if (pathname === "/dashboard" && authUserId) refetchUser();
   }, [pathname, authUserId]);
 
-  // Supabase Realtime: sync when boards/workspace change in DB (other devices)
+  // Supabase Realtime: sync when boards/workspace change (other users see updates)
   useEffect(() => {
     if (!authUserId) return;
     const supabase = createClient();
@@ -975,19 +988,21 @@ export default function Dashboard() {
       .on("postgres_changes", { event: "*", schema: "public", table: "boards" }, onRefresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "board_members" }, onRefresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "workspace" }, onRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "workspace_members" }, onRefresh)
       .subscribe();
     return () => {
       supabase.removeChannel(channel);
     };
   }, [authUserId]);
 
-  // Polling fallback: refresh every 5s
+  // Polling: refresh every 5s so boards/workspaces stay in sync (realtime + constant fetch)
   useEffect(() => {
     if (!authUserId) return;
     let cancelled = false;
     const poll = () => {
       refreshDashboard().catch(() => {});
     };
+    poll();
     const id = setInterval(() => {
       if (!cancelled) poll();
     }, 5000);
@@ -1021,6 +1036,7 @@ export default function Dashboard() {
       id: tempId,
       name,
       created_at: new Date().toISOString(),
+      boardid: null,
     };
     setWorkspaces((prev) => [optimistic, ...prev]);
     setAddWorkspaceName("");
@@ -1038,6 +1054,7 @@ export default function Dashboard() {
         data,
         ...prev.filter((w) => w.id !== tempId && w.id !== data.id),
       ]);
+      refreshDashboard().catch(() => {});
       safeBroadcast();
     }
   };
@@ -1072,6 +1089,7 @@ export default function Dashboard() {
         { ...data, workspaceName },
         ...prev.filter((b) => b.id !== tempId && b.id !== data.id),
       ]);
+      refreshDashboard().catch(() => {});
       safeBroadcast();
     }
   };
@@ -1089,6 +1107,8 @@ export default function Dashboard() {
       setBoards((prev) => [board, ...prev]);
     } else {
       optimisticallyDeletedBoardIdsRef.current.delete(board.id);
+      refreshDashboard().catch(() => {});
+      safeBroadcast();
     }
   };
 
@@ -1104,10 +1124,11 @@ export default function Dashboard() {
       setError(normalizeNetworkError(delErr.message));
       optimisticallyDeletedWorkspaceIdsRef.current.delete(ws.id);
       setWorkspaces((prev) => [...prev, ws].sort((a, b) => a.name.localeCompare(b.name)));
-      // Restore boards for this workspace - we'd need to refetch; simpler: just refresh
-      refreshDashboard();
+      refreshDashboard().catch(() => {});
     } else {
       optimisticallyDeletedWorkspaceIdsRef.current.delete(ws.id);
+      refreshDashboard().catch(() => {});
+      safeBroadcast();
       if (selectedWorkspaceForMembers?.id === ws.id) {
         setShowMembersModal(false);
         setSelectedWorkspaceForMembers(null);
@@ -1204,10 +1225,10 @@ export default function Dashboard() {
               ) : (
                 <span className="text-white/60 text-6xl sm:text-7xl md:text-8xl font-medium">{(user?.full_name ?? user?.email ?? "?").charAt(0).toUpperCase()}</span>
               )}
-            </div>
+          </div>
             <div className="absolute inset-0 rounded-full bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200">
               <span className="text-white font-medium text-base sm:text-lg">Update profile</span>
-            </div>
+        </div>
           </div>
         </div>
       )}

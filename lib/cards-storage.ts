@@ -13,28 +13,30 @@ export type Item = {
 
 export type Card = {
   id: number;
-  carditemid: number;
   cardname: string;
-  cardthemid?: number;
+  boardid?: string;
   position?: number;
 };
 
 // --- Items (itemslist) ---
 
-/** Create a new item and return its id */
+/** Create a new item and return its id. Optionally place it in a column (cardid = cardslist.id). */
 export async function createItem(
   name: string,
-  comment: string = ""
+  comment: string = "",
+  cardid?: number | null
 ): Promise<{ data: number | null; error: Error | null }> {
   const supabase = createClient();
+  const payload: Record<string, unknown> = {
+    name: name.trim(),
+    comment: comment.trim(),
+    createddate: new Date().toISOString(),
+    status: false,
+  };
+  if (cardid != null) payload.cardid = cardid;
   const { data, error } = await supabase
     .from("itemslist")
-    .insert({
-      name: name.trim(),
-      comment: comment.trim(),
-      createddate: new Date().toISOString(),
-      status: false,
-    })
+    .insert(payload)
     .select("id")
     .single();
 
@@ -76,81 +78,111 @@ export async function getItem(
   return { data, error };
 }
 
-// --- Cards (cardslist) ---
+// --- Cards (cardslist = columns; itemslist.cardid → cardslist.id) ---
 
-async function getBoardCardid(supabase: ReturnType<typeof createClient>, boardId: string): Promise<number | null> {
-  const { data } = await supabase.from("boards").select("cardid").eq("id", String(boardId).trim()).single();
-  return data?.cardid != null ? Number(data.cardid) : null;
-}
-
-/** Create a new card linked to an item and optional board theme (cardthemid). If cardthemid is provided, the card is on that board. */
+/** Assign an existing item to a column (update itemslist.cardid). Resolves listName + boardId to column id. */
 export async function createCard(
   itemId: number,
   cardname: string,
-  cardthemid?: number | null,
+  boardId?: string | null,
   position?: number
 ): Promise<{ data: number | null; error: Error | null }> {
   const supabase = createClient();
-  const payload: Record<string, unknown> = { carditemid: itemId, cardname: cardname.trim() };
-  if (cardthemid != null) payload.cardthemid = cardthemid;
-  if (position != null) payload.position = position;
-  const { data, error } = await supabase
+  const board = String(boardId ?? "").trim();
+  if (!board) return { data: null, error: new Error("boardId required to assign item to a list") };
+  const { data: col } = await supabase
     .from("cardslist")
-    .insert(payload)
     .select("id")
-    .single();
-
+    .eq("boardid", board)
+    .eq("cardname", cardname.trim())
+    .limit(1)
+    .maybeSingle();
+  const columnId = (col as { id: number } | null)?.id;
+  if (columnId == null) return { data: null, error: new Error("Column not found for list: " + cardname) };
+  const { error } = await supabase.from("itemslist").update({ cardid: columnId }).eq("id", itemId);
   if (error) return { data: null, error };
-  return { data: data?.id ?? null, error: null };
+  return { data: columnId, error: null };
 }
 
-/** Create an empty column placeholder in cardslist (carditemid = null) for the board's theme. */
+/** Create an empty column in cardslist for the board. Rejects empty list names. */
 export async function createEmptyColumnInCardslist(
   boardId: string,
   listName: string,
   position: number
 ): Promise<{ error: Error | null }> {
+  const trimmed = listName.trim();
+  if (!trimmed) return { error: new Error("List name cannot be empty") };
   const supabase = createClient();
-  const cardthemid = await getBoardCardid(supabase, boardId);
-  if (cardthemid == null) return { error: new Error("Board or board theme not found") };
-  const payload: Record<string, unknown> = { cardthemid, cardname: listName.trim(), position };
+  const payload: Record<string, unknown> = { boardid: boardId, cardname: trimmed, position };
   const { error } = await supabase.from("cardslist").insert(payload);
   return { error: error as Error | null };
 }
 
-/** Update an empty column's name in cardslist (rows with carditemid = null). */
+/** Update an empty column's name in cardslist. */
 export async function updateEmptyColumnInCardslist(
   boardId: string,
   oldListName: string,
   newListName: string
 ): Promise<{ error: Error | null }> {
   const supabase = createClient();
-  const cardthemid = await getBoardCardid(supabase, boardId);
-  if (cardthemid == null) return { error: new Error("Board or board theme not found") };
   const { error } = await supabase
     .from("cardslist")
     .update({ cardname: newListName.trim() })
-    .eq("cardthemid", cardthemid)
-    .eq("cardname", oldListName.trim())
-    .is("carditemid", null);
+    .eq("boardid", boardId)
+    .eq("cardname", oldListName.trim());
   return { error: error as Error | null };
 }
 
-/** Delete empty column placeholder(s) from cardslist (rows with carditemid = null). */
+/** Delete empty column(s) from cardslist only if they have no items (no itemslist where cardid = column id). */
 export async function deleteEmptyColumnFromCardslist(
   boardId: string,
   listName: string
 ): Promise<{ error: Error | null }> {
   const supabase = createClient();
-  const cardthemid = await getBoardCardid(supabase, boardId);
-  if (cardthemid == null) return { error: new Error("Board or board theme not found") };
-  const { error } = await supabase
+  const name = listName.trim();
+  const { data: cols, error: fetchErr } = await supabase
+    .from("cardslist")
+    .select("id")
+    .eq("boardid", boardId)
+    .eq("cardname", name);
+  if (fetchErr) return { error: fetchErr as Error };
+  for (const col of cols ?? []) {
+    const cid = (col as { id: number }).id;
+    const { data: items } = await supabase.from("itemslist").select("id").eq("cardid", cid).limit(1);
+    if (items?.length) continue; // has items, don't delete
+    await supabase.from("cardslist").delete().eq("id", cid);
+  }
+  return { error: null };
+}
+
+/** Delete a column (list) and all items in it; removes itemslist rows and their comments/activities. */
+export async function deleteColumnFromCardslist(
+  boardId: string,
+  listName: string
+): Promise<{ error: Error | null }> {
+  const supabase = createClient();
+  const name = listName.trim();
+  const { data: cols, error: fetchErr } = await supabase
+    .from("cardslist")
+    .select("id")
+    .eq("boardid", boardId)
+    .eq("cardname", name);
+  if (fetchErr) return { error: fetchErr as Error };
+  const columnIds = (cols ?? []).map((c: { id: number }) => c.id);
+  if (columnIds.length === 0) return { error: null };
+  const { data: items } = await supabase.from("itemslist").select("id").in("cardid", columnIds);
+  const itemIds = (items ?? []).map((i: { id: number }) => i.id);
+  for (const itemId of itemIds) {
+    await supabase.from("item_comments").delete().eq("item_id", itemId);
+    await supabase.from("item_activities").delete().eq("item_id", itemId);
+    await supabase.from("itemslist").delete().eq("id", itemId);
+  }
+  const { error: delErr } = await supabase
     .from("cardslist")
     .delete()
-    .eq("cardthemid", cardthemid)
-    .eq("cardname", listName.trim())
-    .is("carditemid", null);
-  return { error: error as Error | null };
+    .eq("boardid", boardId)
+    .eq("cardname", name);
+  return { error: delErr as Error | null };
 }
 
 /** Update empty column positions in cardslist. */
@@ -159,35 +191,39 @@ export async function updateEmptyColumnPositionsInCardslist(
   listOrder: Array<{ listname: string; position: number }>
 ): Promise<{ error: Error | null }> {
   const supabase = createClient();
-  const cardthemid = await getBoardCardid(supabase, boardId);
-  if (cardthemid == null) return { error: new Error("Board or board theme not found") };
   for (let i = 0; i < listOrder.length; i++) {
     const { error } = await supabase
       .from("cardslist")
       .update({ position: i })
-      .eq("cardthemid", cardthemid)
-      .eq("cardname", listOrder[i].listname.trim())
-      .is("carditemid", null);
+      .eq("boardid", boardId)
+      .eq("cardname", listOrder[i].listname.trim());
     if (error) return { error: error as Error };
   }
   return { error: null };
 }
 
-/** Update a card's list (cardname = list/column name). */
+/** Update a card's list: set item's column (itemslist.cardid) to the column for the given list name on the board. */
 export async function updateCardList(
-  cardId: number,
+  itemId: number,
+  boardId: string,
   listName: string
 ): Promise<{ error: Error | null }> {
   const supabase = createClient();
-  const { error } = await supabase
+  const bid = String(boardId ?? "").trim();
+  const { data: col } = await supabase
     .from("cardslist")
-    .update({ cardname: listName.trim() })
-    .eq("id", cardId);
-
-  return { error };
+    .select("id")
+    .eq("boardid", bid)
+    .eq("cardname", listName.trim())
+    .limit(1)
+    .maybeSingle();
+  const columnId = (col as { id: number } | null)?.id;
+  if (columnId == null) return { error: new Error("Column not found: " + listName) };
+  const { error } = await supabase.from("itemslist").update({ cardid: columnId }).eq("id", itemId);
+  return { error: error as Error | null };
 }
 
-/** Create an item and a card on a board in one go. boardId is used to set cardthemid so the card appears on that board. Returns { itemId, cardId }. */
+/** Create an item and place it in a list on the board. Gets or creates the column (cardslist) for listName, then creates itemslist with cardid = column id. Returns { itemId, cardId } (cardId = itemId). */
 export async function createCardWithItem(
   name: string,
   listName: string,
@@ -197,74 +233,86 @@ export async function createCardWithItem(
   data: { itemId: number; cardId: number } | null;
   error: Error | null;
 }> {
-  const { data: itemId, error: itemError } = await createItem(name, comment);
+  const supabase = createClient();
+  const trimmedList = listName.trim();
+  const bid = boardId != null && boardId !== "" ? String(boardId).trim() : null;
+  if (!bid) return { data: null, error: new Error("boardId required") };
+
+  let columnId: number | null = null;
+  const { data: existing } = await supabase
+    .from("cardslist")
+    .select("id")
+    .eq("boardid", bid)
+    .eq("cardname", trimmedList)
+    .limit(1)
+    .maybeSingle();
+  if (existing != null) columnId = (existing as { id: number }).id;
+  if (columnId == null) {
+    const { data: maxRow } = await supabase
+      .from("cardslist")
+      .select("position")
+      .eq("boardid", bid)
+      .order("position", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const position = maxRow?.position != null ? (maxRow.position as number) + 1 : 0;
+    const { data: inserted, error: insErr } = await supabase
+      .from("cardslist")
+      .insert({ boardid: bid, cardname: trimmedList, position })
+      .select("id")
+      .single();
+    if (insErr) return { data: null, error: insErr };
+    columnId = (inserted as { id: number })?.id ?? null;
+  }
+  if (columnId == null) return { data: null, error: new Error("Failed to get or create column") };
+
+  const { data: itemId, error: itemError } = await createItem(name, comment, columnId);
   if (itemError || itemId === null) {
     return { data: null, error: itemError ?? new Error("Failed to create item") };
   }
-
-  const supabase = createClient();
-  let cardthemid: number | null = null;
-  let position: number = 0;
-  if (boardId) {
-    cardthemid = await getBoardCardid(supabase, boardId);
-    if (cardthemid != null) {
-      const { data: maxRow } = await supabase
-        .from("cardslist")
-        .select("position")
-        .eq("cardthemid", cardthemid)
-        .order("position", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      position = maxRow?.position != null ? (maxRow.position as number) + 1 : 0;
-    }
-  }
-
-  const { data: cardId, error: cardError } = await createCard(itemId, listName, cardthemid, position);
-  if (cardError || cardId === null) {
-    return { data: null, error: cardError ?? new Error("Failed to create card") };
-  }
-
-  return { data: { itemId, cardId }, error: null };
+  return { data: { itemId, cardId: itemId }, error: null };
 }
 
-// --- Board cards (no boardcards table; cards live in cardslist by cardthemid = board.cardid) ---
+// --- Board cards (cards live in cardslist by boardid) ---
 
-/** Add a card (by item) to a board: creates a new cardslist row with cardthemid = board.cardid. Use when copying an existing card onto a board. cardId = existing cardslist id (used to get carditemid). */
+/** Add a card (copy item) to a board: create a new itemslist row with cardid = target column id, copying name/comment from source item. itemId = source itemslist id; listName = target list on the board. */
 export async function addCardToBoard(
-  cardId: number,
+  itemId: number,
   boardName: string,
   listName?: string,
   position?: number
 ): Promise<{ data: number | null; error: Error | null }> {
   const supabase = createClient();
-  const cardthemid = await getBoardCardid(supabase, String(boardName ?? "").trim());
-  if (cardthemid == null) return { data: null, error: new Error("Board or board theme not found") };
-  const { data: cardRow } = await supabase.from("cardslist").select("carditemid").eq("id", cardId).single();
-  const itemId = cardRow?.carditemid as number | undefined;
-  if (itemId == null) return { data: null, error: new Error("Card has no linked item") };
-  let pos = position ?? 0;
-  if (position === undefined) {
-    const { data: maxRow } = await supabase
-      .from("cardslist")
-      .select("position")
-      .eq("cardthemid", cardthemid)
-      .order("position", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    pos = maxRow?.position != null ? (maxRow.position as number) + 1 : 0;
-  }
-  const payload: Record<string, unknown> = {
-    cardthemid,
-    carditemid: itemId,
-    cardname: (listName ?? "").trim() || "To Do",
-    position: pos,
-  };
-  const { data, error } = await supabase.from("cardslist").insert(payload).select("id").single();
+  const boardId = String(boardName ?? "").trim();
+  const { data: sourceItem } = await supabase.from("itemslist").select("name, comment, description, status, cover_path").eq("id", itemId).single();
+  if (!sourceItem) return { data: null, error: new Error("Source item not found") };
+  const { data: col } = await supabase
+    .from("cardslist")
+    .select("id")
+    .eq("boardid", boardId)
+    .eq("cardname", (listName ?? "").trim() || "To Do")
+    .limit(1)
+    .maybeSingle();
+  const columnId = (col as { id: number } | null)?.id;
+  if (columnId == null) return { data: null, error: new Error("Target column not found") };
+  const { data: newRow, error } = await supabase
+    .from("itemslist")
+    .insert({
+      name: (sourceItem as { name: string }).name,
+      comment: (sourceItem as { comment?: string }).comment ?? "",
+      createddate: new Date().toISOString(),
+      status: (sourceItem as { status?: boolean }).status ?? false,
+      cardid: columnId,
+      ...((sourceItem as { description?: string | null }).description != null && { description: (sourceItem as { description?: string | null }).description }),
+      ...((sourceItem as { cover_path?: string | null }).cover_path != null && { cover_path: (sourceItem as { cover_path?: string | null }).cover_path }),
+    })
+    .select("id")
+    .single();
   if (error) return { data: null, error };
-  return { data: data?.id ?? null, error: null };
+  return { data: (newRow as { id: number })?.id ?? null, error: null };
 }
 
-/** Update card position (cardslist.position) for reordering. */
+/** Update cardslist position for a column (reordering columns). */
 export async function updateBoardCardPosition(
   boardCardId: number,
   position: number
@@ -274,17 +322,12 @@ export async function updateBoardCardPosition(
   return { error };
 }
 
-/** Update cardslist position (for reordering within list) */
+/** No-op: itemslist has no position column. Kept for API compatibility. */
 export async function updateCardPosition(
-  cardId: number,
-  position: number
+  _cardId: number,
+  _position: number
 ): Promise<{ error: Error | null }> {
-  const supabase = createClient();
-  const { error } = await supabase
-    .from("cardslist")
-    .update({ position })
-    .eq("id", cardId);
-  return { error };
+  return { error: null };
 }
 
 /** Get list/column order for a board from board_list_order */
@@ -323,114 +366,69 @@ export async function updateBoardListOrder(
   return { error };
 }
 
-/** Remove a card from a board (delete the cardslist row for this board theme). */
+/** Remove a card from a board: delete the itemslist row (and its comments/activities). cardId = itemslist.id. */
 export async function removeCardFromBoard(
   cardId: number,
-  boardName: string
+  _boardName: string
 ): Promise<{ error: Error | null }> {
   const supabase = createClient();
-  const cardthemid = await getBoardCardid(supabase, String(boardName ?? "").trim());
-  if (cardthemid == null) return { error: new Error("Board or board theme not found") };
-  const { error } = await supabase
-    .from("cardslist")
-    .delete()
-    .eq("id", cardId)
-    .eq("cardthemid", cardthemid);
+  await supabase.from("item_comments").delete().eq("item_id", cardId);
+  await supabase.from("item_activities").delete().eq("item_id", cardId);
+  const { error } = await supabase.from("itemslist").delete().eq("id", cardId);
   return { error };
 }
 
-/** Delete a card everywhere and remove its item/comments/activities if no other cards reference that item. */
+/** Delete a card (item) everywhere: delete the itemslist row and its comments/activities. cardId = itemslist.id. */
 export async function deleteCardAndItem(
   cardId: number
 ): Promise<{ error: Error | null }> {
   const supabase = createClient();
-
-  const { data: cardRow, error: cardErr } = await supabase
-    .from("cardslist")
-    .select("carditemid")
-    .eq("id", cardId)
-    .maybeSingle();
-  if (cardErr) return { error: cardErr as unknown as Error };
-  const itemId = (cardRow?.carditemid as number | null) ?? null;
-
-  const { error: cErr } = await supabase.from("cardslist").delete().eq("id", cardId);
-  if (cErr) return { error: cErr as unknown as Error };
-
-  if (itemId != null) {
-    const { data: otherCards, error: otherErr } = await supabase
-      .from("cardslist")
-      .select("id")
-      .eq("carditemid", itemId)
-      .limit(1);
-    if (otherErr) return { error: otherErr as unknown as Error };
-    if (!otherCards?.length) {
-      await supabase.from("item_comments").delete().eq("item_id", itemId);
-      await supabase.from("item_activities").delete().eq("item_id", itemId);
-      const { error: itemErr } = await supabase.from("itemslist").delete().eq("id", itemId);
-      if (itemErr) return { error: itemErr as unknown as Error };
-    }
-  }
-
-  return { error: null };
+  await supabase.from("item_comments").delete().eq("item_id", cardId);
+  await supabase.from("item_activities").delete().eq("item_id", cardId);
+  const { error } = await supabase.from("itemslist").delete().eq("id", cardId);
+  return { error: error as Error | null };
 }
 
-/** Get all cards for a board (cardslist where cardthemid = board.cardid). Ordered by list name then position. */
+/** Get all cards for a board: columns (cardslist) + items (itemslist where cardid = column id). Returns one entry per item with boardCardId = column id, cardId = item id. */
 export async function getBoardCards(boardName: string): Promise<{
   data: Array<{ boardCardId: number; cardId: number; listName: string; title: string; position: number; item?: Item }> | null;
   error: Error | null;
 }> {
   const supabase = createClient();
   const boardId = String(boardName ?? "").trim();
-  const cardthemid = await getBoardCardid(supabase, boardId);
-  if (cardthemid == null) return { data: [], error: null };
 
-  const { data: rows, error } = await supabase
+  const { data: columns, error: colErr } = await supabase
     .from("cardslist")
-    .select(
-      `
-      id,
-      carditemid,
-      cardname,
-      position,
-      itemslist (
-        id,
-        name,
-        comment,
-        createddate,
-        status,
-        cover_path
-      )
-    `
-    )
-    .eq("cardthemid", cardthemid);
+    .select("id, cardname, position")
+    .eq("boardid", boardId)
+    .order("position", { ascending: true });
 
-  if (error) return { data: null, error };
-  if (!rows?.length) return { data: [], error: null };
+  if (colErr) return { data: null, error: colErr };
+  if (!columns?.length) return { data: [], error: null };
 
-  const result = (rows as Array<{
-    id: number;
-    carditemid: number | null;
-    cardname: string;
-    position?: number;
-    itemslist?: Item | Item[] | null;
-  }>)
-    .map((row) => {
-      const rawItem = Array.isArray(row.itemslist) ? row.itemslist[0] : row.itemslist;
-      const item = rawItem as Item | undefined;
-      return {
-        boardCardId: row.id,
-        cardId: row.id,
-        listName: row.cardname ?? "",
-        title: item?.name ?? "",
-        position: typeof row.position === "number" ? row.position : 0,
-        item: item ? { ...item, status: item.status ?? false, cover_path: item.cover_path ?? null } : undefined,
-      };
-    })
-    .sort((a, b) => {
-      if (a.listName !== b.listName) return a.listName.localeCompare(b.listName);
-      return a.position - b.position;
+  const result: Array<{ boardCardId: number; cardId: number; listName: string; title: string; position: number; item?: Item }> = [];
+  for (const col of columns as Array<{ id: number; cardname: string; position?: number }>) {
+    const { data: items } = await supabase
+      .from("itemslist")
+      .select("id, name, comment, createddate, status, cover_path, description")
+      .eq("cardid", col.id)
+      .order("createddate", { ascending: true });
+    const list = (items ?? []) as Array<Item & { id: number }>;
+    list.forEach((item, idx) => {
+      result.push({
+        boardCardId: col.id,
+        cardId: item.id,
+        listName: col.cardname ?? "",
+        title: item.name ?? "",
+        position: typeof col.position === "number" ? col.position : idx,
+        item: { ...item, status: item.status ?? false, cover_path: item.cover_path ?? null },
+      });
     });
-
+  }
+  result.sort((a, b) => {
+    if (a.listName !== b.listName) return a.listName.localeCompare(b.listName);
+    return a.position - b.position;
+  });
   return { data: result, error: null };
 }
 
