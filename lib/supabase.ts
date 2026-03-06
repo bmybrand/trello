@@ -209,20 +209,28 @@ export async function uploadBackgroundImage(
   return { url: `${publicUrl}?t=${Date.now()}`, error: null };
 }
 
-/** Upload a cover image to Supabase Storage. Requires a bucket named "covers" with public read access. */
+/** Upload a cover image via the API route (uses service role, bypasses storage RLS). */
 export async function uploadCoverImage(
   file: File
 ): Promise<{ url: string | null; error: Error | null }> {
-  const supabase = createClient();
-  const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
-  const path = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-  const { data, error } = await supabase.storage
-    .from(COVERS_BUCKET)
-    .upload(path, file, { upsert: false });
-  if (error) return { url: null, error };
-  const {
-    data: { publicUrl },
-  } = supabase.storage.from(COVERS_BUCKET).getPublicUrl(data.path);
-  return { url: publicUrl, error: null };
+  try {
+    const formData = new FormData();
+    formData.set("file", file);
+    const res = await fetch("/api/upload-cover", {
+      method: "POST",
+      body: formData,
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { url: null, error: new Error(json?.error ?? res.statusText ?? "Upload failed") };
+    }
+    const path = json?.path;
+    if (!path || typeof path !== "string") {
+      return { url: null, error: new Error("No URL returned from upload") };
+    }
+    return { url: path, error: null };
+  } catch (err) {
+    return { url: null, error: err instanceof Error ? err : new Error("Upload failed") };
+  }
 }
 
